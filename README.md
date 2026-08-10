@@ -12,12 +12,12 @@ kelana-ai/
 ├── backend/
 │   └── main.py        # Console-based Trip Summary Generator (entry point)
 └── frontend/
-    └── .gitkeep       # Placeholder — frontend coming later
+    └── .gitkeep       # Placeholder, frontend coming later
 ```
 
 ## Requirements
 
-- Python 3 (standard library only — no third-party dependencies)
+- Python 3 (Standard library only. No third-party dependencies)
 
 ## Running the App
 
