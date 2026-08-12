@@ -4,6 +4,21 @@ Console-based baseline feature for KelanaAI, a travel planning application
 with an integrated AI assistant for users in Indonesia.
 """
 
+try:
+    from backend.services.trip_service import (
+        calculate_daily_budget,
+        get_recommended_places,
+        get_recommended_transportation,
+        get_trip_category,
+    )
+except ModuleNotFoundError:
+    from services.trip_service import (
+        calculate_daily_budget,
+        get_recommended_places,
+        get_recommended_transportation,
+        get_trip_category,
+    )
+
 def print_trip_summary(
     destination: str,
     country: str,
@@ -15,6 +30,10 @@ def print_trip_summary(
     transport_cost: int,
     food_cost: int,
     misc_cost: int,
+    category: str,
+    daily_budget: float,
+    recommended_places: list[str],
+    recommended_transportation: str,
 ) -> None:
     """Print a formatted summary of the trip details."""
     cost_list = [hotel_cost, transport_cost, food_cost, misc_cost]
@@ -38,6 +57,12 @@ def print_trip_summary(
     print(f"Food Cost:            {food_cost} {currency}")
     print(f"Misc Cost:            {misc_cost} {currency}")
     print(f"Total Estimated Cost: {total} {currency} +- {stdev:,.2f} {currency}")
+    print(f"Category:             {category}")
+    print(f"Daily Budget:         {daily_budget} {currency}/Day")
+    print("Recommended Places:")
+    for place in recommended_places:
+        print(f"- {place}")
+    print(f"Recommended Transportation: {recommended_transportation}")
 
 def main() -> None:
     """Prompt for trip details and print the trip summary."""
@@ -52,6 +77,11 @@ def main() -> None:
     food_cost = int(input("Food Cost: "))
     misc_cost = int(input("Miscellaneous Cost: "))
 
+    daily_budget = calculate_daily_budget(budget, days)
+    category = get_trip_category(budget)
+    recommended_places = get_recommended_places(category)
+    recommended_transportation = get_recommended_transportation(category)
+
     print_trip_summary(
         destination,
         country,
@@ -63,6 +93,10 @@ def main() -> None:
         transport_cost,
         food_cost,
         misc_cost,
+        category,
+        daily_budget,
+        recommended_places,
+        recommended_transportation,
     )
 
 if __name__ == "__main__":
