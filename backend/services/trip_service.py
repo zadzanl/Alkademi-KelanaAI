@@ -25,6 +25,15 @@ def calculate_daily_budget(budget: float, days: int) -> float:
     return budget / days
 
 
+def get_travel_season(month: str) -> str:
+    """Classify an entered travel month using the lesson's season rules."""
+    if month == "December":
+        return "Peak Season"
+    if month == "June":
+        return "Holiday Season"
+    return "Regular Season"
+
+
 def get_trip_category(budget: float) -> str:
     """Classify an entered budget using the lesson's nominal thresholds."""
     if budget < 1000:

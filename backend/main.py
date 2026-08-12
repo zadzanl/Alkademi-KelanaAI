@@ -9,6 +9,7 @@ try:
         calculate_daily_budget,
         get_recommended_places,
         get_recommended_transportation,
+        get_travel_season,
         get_trip_category,
     )
 except ModuleNotFoundError:
@@ -16,6 +17,7 @@ except ModuleNotFoundError:
         calculate_daily_budget,
         get_recommended_places,
         get_recommended_transportation,
+        get_travel_season,
         get_trip_category,
     )
 
@@ -26,6 +28,7 @@ def print_trip_summary(
     budget: float,
     currency: str,
     travel_month: str,
+    travel_season: str,
     hotel_cost: int,
     transport_cost: int,
     food_cost: int,
@@ -52,6 +55,7 @@ def print_trip_summary(
     print(f"Budget:               {budget} {currency}")
     print(f"Currency:             {currency}")
     print(f"Travel Month:         {travel_month}")
+    print(f"Travel Season:        {travel_season}")
     print(f"Hotel Cost:           {hotel_cost} {currency}")
     print(f"Transport Cost:       {transport_cost} {currency}")
     print(f"Food Cost:            {food_cost} {currency}")
@@ -78,6 +82,7 @@ def main() -> None:
     misc_cost = int(input("Miscellaneous Cost: "))
 
     daily_budget = calculate_daily_budget(budget, days)
+    travel_season = get_travel_season(travel_month)
     category = get_trip_category(budget)
     recommended_places = get_recommended_places(category)
     recommended_transportation = get_recommended_transportation(category)
@@ -89,6 +94,7 @@ def main() -> None:
         budget,
         currency,
         travel_month,
+        travel_season,
         hotel_cost,
         transport_cost,
         food_cost,

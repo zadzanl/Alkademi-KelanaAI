@@ -6,6 +6,7 @@ from backend.services.trip_service import (
     calculate_daily_budget,
     get_recommended_places,
     get_recommended_transportation,
+    get_travel_season,
     get_trip_category,
 )
 
@@ -13,6 +14,16 @@ from backend.services.trip_service import (
 class TripServiceTests(unittest.TestCase):
     def test_daily_budget(self) -> None:
         self.assertEqual(calculate_daily_budget(1500, 5), 300.0)
+
+    def test_travel_seasons(self) -> None:
+        expected = {
+            "December": "Peak Season",
+            "June": "Holiday Season",
+            "March": "Regular Season",
+        }
+        for month, season in expected.items():
+            with self.subTest(month=month):
+                self.assertEqual(get_travel_season(month), season)
 
     def test_category_boundaries(self) -> None:
         expected = {
