@@ -41,6 +41,8 @@ build/
 # Dependency directories
 node_modules/
 jspm_packages/
+.venv/
+tests/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

@@ -1,109 +1,94 @@
-"""KelanaAI - Trip Summary Generator.
+"""KelanaAI FastAPI application.
 
-Console-based baseline feature for KelanaAI, a travel planning application
-with an integrated AI assistant for users in Indonesia.
+Status: active | Phase: REST API cut-over | Last modified: 2026-08-18
+Known ceiling: Recommendations remain static and nominal-budget based; replace the
+service rules through a future approved change when destination-aware data exists.
 """
 
-try:
-    from backend.services.trip_service import (
-        calculate_daily_budget,
-        get_recommended_places,
-        get_recommended_transportation,
-        get_travel_season,
-        get_trip_category,
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+from backend.services.trip_service import (
+    calculate_daily_budget,
+    get_recommended_places,
+    get_recommended_transportation,
+    get_travel_season,
+    get_trip_category,
+)
+
+
+app = FastAPI()
+
+# Mirrors RECOMMENDATIONS transportation order: Backpacker, Standard, Luxury.
+TRANSPORTATIONS = ["Bus", "Train", "Flight"]
+
+
+class TripRequest(BaseModel):
+    """Validated trip input accepted by the REST API."""
+
+    destination: str
+    country: str
+    days: int = Field(gt=0)
+    budget: float
+    currency: str
+    travel_month: str
+
+
+class TripResponse(BaseModel):
+    """Trip details and deterministic recommendations returned by the API."""
+
+    destination: str
+    country: str
+    days: int
+    budget: float
+    currency: str
+    travel_month: str
+    daily_budget: float
+    travel_season: str
+    category: str
+    recommended_places: list[str]
+    recommended_transportation: str
+
+
+@app.get("/")
+def welcome() -> dict[str, str]:
+    """Return the application welcome message."""
+    return {"message": "Welcome to KelanaAI"}
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Return the application health status."""
+    return {"status": "OK"}
+
+
+@app.get("/api/v1/recommendations")
+def list_recommendations() -> list[str]:
+    """Return the service-backed ordered place recommendations."""
+    return get_recommended_places(get_trip_category(1500))
+
+
+@app.get("/api/v1/transportations")
+def list_transportations() -> list[str]:
+    """Return the ordered transportation options."""
+    return TRANSPORTATIONS
+
+
+@app.post("/api/v1/trips", response_model=TripResponse)
+def create_trip(trip: TripRequest) -> TripResponse:
+    """Create a deterministic trip recommendation from validated input."""
+    category = get_trip_category(trip.budget)
+
+    return TripResponse(
+        destination=trip.destination,
+        country=trip.country,
+        days=trip.days,
+        budget=trip.budget,
+        currency=trip.currency,
+        travel_month=trip.travel_month,
+        daily_budget=calculate_daily_budget(trip.budget, trip.days),
+        travel_season=get_travel_season(trip.travel_month),
+        category=category,
+        recommended_places=get_recommended_places(category),
+        recommended_transportation=get_recommended_transportation(category),
     )
-except ModuleNotFoundError:
-    from services.trip_service import (
-        calculate_daily_budget,
-        get_recommended_places,
-        get_recommended_transportation,
-        get_travel_season,
-        get_trip_category,
-    )
-
-def print_trip_summary(
-    destination: str,
-    country: str,
-    days: int,
-    budget: float,
-    currency: str,
-    travel_month: str,
-    travel_season: str,
-    hotel_cost: int,
-    transport_cost: int,
-    food_cost: int,
-    misc_cost: int,
-    category: str,
-    daily_budget: float,
-    recommended_places: list[str],
-    recommended_transportation: str,
-) -> None:
-    """Print a formatted summary of the trip details."""
-    cost_list = [hotel_cost, transport_cost, food_cost, misc_cost]
-    total = sum(cost_list)
-    mean = total / len(cost_list)
-    stdev = (sum((x - mean) ** 2 for x in cost_list) / (len(cost_list) - 1)) ** 0.5
-
-    print()
-    print("========================")
-    print("KelanaAI")
-    print("========================")
-    print()
-    print(f"Destination:          {destination}")
-    print(f"Country:              {country}")
-    print(f"Days:                 {days}")
-    print(f"Budget:               {budget} {currency}")
-    print(f"Currency:             {currency}")
-    print(f"Travel Month:         {travel_month}")
-    print(f"Travel Season:        {travel_season}")
-    print(f"Hotel Cost:           {hotel_cost} {currency}")
-    print(f"Transport Cost:       {transport_cost} {currency}")
-    print(f"Food Cost:            {food_cost} {currency}")
-    print(f"Misc Cost:            {misc_cost} {currency}")
-    print(f"Total Estimated Cost: {total} {currency} +- {stdev:,.2f} {currency}")
-    print(f"Category:             {category}")
-    print(f"Daily Budget:         {daily_budget} {currency}/Day")
-    print("Recommended Places:")
-    for place in recommended_places:
-        print(f"- {place}")
-    print(f"Recommended Transportation: {recommended_transportation}")
-
-def main() -> None:
-    """Prompt for trip details and print the trip summary."""
-    destination = input("Destination: ")
-    country = input("Country: ")
-    days = int(input("Days: "))
-    budget = float(input("Budget: "))
-    currency = input("Currency: ")
-    travel_month = input("Travel Month: ")
-    hotel_cost = int(input("Hotel Cost: "))
-    transport_cost = int(input("Transport Cost: "))
-    food_cost = int(input("Food Cost: "))
-    misc_cost = int(input("Miscellaneous Cost: "))
-
-    daily_budget = calculate_daily_budget(budget, days)
-    travel_season = get_travel_season(travel_month)
-    category = get_trip_category(budget)
-    recommended_places = get_recommended_places(category)
-    recommended_transportation = get_recommended_transportation(category)
-
-    print_trip_summary(
-        destination,
-        country,
-        days,
-        budget,
-        currency,
-        travel_month,
-        travel_season,
-        hotel_cost,
-        transport_cost,
-        food_cost,
-        misc_cost,
-        category,
-        daily_budget,
-        recommended_places,
-        recommended_transportation,
-    )
-
-if __name__ == "__main__":
-    main()
