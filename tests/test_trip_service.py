@@ -1,4 +1,9 @@
-"""Regression checks for deterministic trip recommendation rules."""
+"""Regression checks for deterministic trip recommendation rules.
+
+Status: active | Phase: trip persistence | Last modified: 2026-08-20
+Insights: Pure deterministic regressions; no DB import required; semantics
+unchanged when tests/ becomes tracked.
+"""
 
 import unittest
 

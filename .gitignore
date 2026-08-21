@@ -42,7 +42,9 @@ build/
 node_modules/
 jspm_packages/
 .venv/
-tests/
+
+# Compiled python cache
+__pycache__/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

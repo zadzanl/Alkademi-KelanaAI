@@ -1,8 +1,6 @@
 # KelanaAI
 
-<!-- status: active | phase: REST API | sprint: week-1 | last_modified: 2026-08-18 | agent_notes: Replaces the console tutorial with the verified FastAPI workflow. | insights: Five API routes compose unchanged deterministic services; validation rejects non-positive days before division. -->
-
-KelanaAI is a travel planning application with an integrated AI assistant, built for users in Indonesia. This repository currently provides a small FastAPI REST API with deterministic budget, season, place, and transportation recommendations.
+KelanaAI is a travel planning application with an integrated AI assistant, built for users in Indonesia.
 
 ## Project Structure
 
@@ -10,7 +8,11 @@ KelanaAI is a travel planning application with an integrated AI assistant, built
 kelana-ai/
 ├── backend/
 │   ├── main.py                 # FastAPI app, schemas, and route handlers
-│   ├── requirements.txt        # Exact API and test dependency pins
+│   ├── database.py             # engine/session lifecycle, init_db()
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── trip.py             # Trip mapping (13-column birth schema)
+│   ├── requirements.txt        # Exact API and persistence dependency pins
 │   └── services/
 │       └── trip_service.py     # Deterministic trip rules
 ├── tests/
@@ -22,48 +24,65 @@ kelana-ai/
 
 ## Requirements
 
-- Python 3
+- Python 3 (3.10+ recommended for `datetime.fromisoformat`).
 - FastAPI 0.141.1
 - Uvicorn 0.52.3 with standard reload extras
 - httpx 0.28.1 for FastAPI TestClient
+- PostgreSQL 18+ (locally installed; see Setup).
+- SQLAlchemy 2.0.52
+- `psycopg[binary]` 3.3.4
+- python-dotenv 1.2.3
 
 ## Setup
 
 Run all commands from the repository root.
 
-Create the local environment:
+### 1. Install PostgreSQL locally
+
+Use the official EDB Windows installer. Check pgAdmin opens and can connect.
+
+Create the database and a least-privileged login role in pgAdmin's Query Tool (or `psql`):
+
+```sql
+CREATE DATABASE kelanaai;
+CREATE USER kelana_app WITH PASSWORD '<your-own-password>';
+GRANT ALL PRIVILEGES ON DATABASE kelanaai TO kelana_app;
+```
+
+If your target PostgreSQL reports `permission denied for schema public` on first app startup, have the database owner grant schema access inside the target database (the role used above is just an example):
+
+```sql
+GRANT USAGE, CREATE ON SCHEMA public TO kelana_app;
+```
+
+**Check**: connecting with the new role, e.g. `psql -U kelana_app -d kelanaai -c "select 1;"`, returns `1`.
+
+### 2. Create the local environment
 
 ```powershell
 python -m venv backend/.venv
-```
-
-Activate it on Windows PowerShell:
-
-```powershell
 backend\.venv\Scripts\Activate.ps1
-```
-
-Or activate it on POSIX shells:
-
-```bash
-source backend/.venv/bin/activate
-```
-
-Install the pinned dependencies:
-
-```bash
 python -m pip install -r backend/requirements.txt
+python -m pip check
 ```
 
-## Run the API
+### 3. Create a root `.env`
 
-Start Uvicorn from the repository root:
+The `.env` file is gitignor-ed.
+
+```text
+DATABASE_URL=postgresql+psycopg://<user>:<password>@127.0.0.1:5432/kelanaai
+```
+
+A `DATABASE_URL` env variable is required. The application refuses to start without a value and prints a one-line `RuntimeError`.
+
+### 4. Run the API
 
 ```bash
 uvicorn backend.main:app --reload
 ```
 
-Open the interactive Swagger UI at <http://127.0.0.1:8000/docs>.
+Check <http://127.0.0.1:8000/docs>; `GET /health` returns `{"status":"OK"}`.
 
 ## API Examples
 
@@ -87,14 +106,36 @@ curl http://127.0.0.1:8000/health
 {"status":"OK"}
 ```
 
-### Create a trip
+### Create a trip example
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/trips -H "Content-Type: application/json" -d '{"destination":"Japan","country":"Japan","days":5,"budget":1500,"currency":"USD","travel_month":"December"}'
 ```
 
 ```json
-{"destination":"Japan","country":"Japan","days":5,"budget":1500.0,"currency":"USD","travel_month":"December","daily_budget":300.0,"travel_season":"Peak Season","category":"Standard","recommended_places":["Tokyo Tower","Shibuya","Mount Fuji"],"recommended_transportation":"Train"}
+{"id":1,"destination":"Japan","country":"Japan","days":5,"budget":1500.0,"currency":"USD","travel_month":"December","daily_budget":300.0,"travel_season":"Peak Season","category":"Standard","recommended_places":["Tokyo Tower","Shibuya","Mount Fuji"],"recommended_transportation":"Train","created_at":"2026-08-20T11:00:00+00:00"}
+```
+
+### List saved trips (ascending ID)
+
+```bash
+curl http://127.0.0.1:8000/api/v1/trips
+```
+
+```json
+[
+  {"id":1,...}
+]
+```
+
+### Retrieve one saved trip
+
+```bash
+curl http://127.0.0.1:8000/api/v1/trips/1
+```
+
+```json
+{"id":1,...}
 ```
 
 ### Recommended places
@@ -125,6 +166,14 @@ Non-positive `days` are rejected with HTTP 422:
 curl -i -X POST http://127.0.0.1:8000/api/v1/trips -H "Content-Type: application/json" -d '{"destination":"Japan","country":"Japan","days":0,"budget":1500,"currency":"USD","travel_month":"December"}'
 ```
 
+## Manual Restart Smoke
+
+After `uvicorn` starts once and create `trips` table, you can verify:
+
+1. Note the `id` and `created_at` of a successfully POSTed trip.
+2. Stop and restart `uvicorn` with the same `.env`.
+3. `GET /api/v1/trips/{id}` with the captured ID. The response is identical to the original, including `created_at`.
+
 ## Tests
 
 Run all regressions from the repository root with the environment activated:
@@ -139,15 +188,9 @@ Run only the API regressions:
 python -m unittest discover -s tests -p "test_api.py" -v
 ```
 
-## Known Limitations
-
-- Travel-month classification is exact and case-sensitive: only `December` and `June` receive special seasons.
-- Budget thresholds use the submitted numeric amount directly; currencies are not converted or normalized.
-- Place recommendations are static and destination-independent.
-- The transportation list is a static API-layer mirror of the current Backpacker, Standard, and Luxury service mappings.
-- There is no persistence, authentication, frontend, AWS deployment, Bedrock integration, or chatbot yet.
-
 ## Release
 
 - `v0.1.0` — Initial console-based Trip Summary Generator.
-- Current working change — FastAPI REST cut-over and read-only recommendation lists.
+- `v0.2.0` — Holiday season classification.
+- `v0.3.0` — FastAPI REST cut-over committed as `dfafa81` (untagged).
+- `v0.4.0` — Current working change: PostgreSQL persistence plus ordered reads.

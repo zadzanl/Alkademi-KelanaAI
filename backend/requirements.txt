@@ -1,3 +1,8 @@
 fastapi==0.141.1
 uvicorn[standard]==0.52.3
 httpx==0.28.1
+
+# Session 4 persistence — pinned per revision-plan-002-junior.md.
+SQLAlchemy==2.0.52
+psycopg[binary]==3.3.4
+python-dotenv==1.2.3
