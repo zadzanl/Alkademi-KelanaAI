@@ -138,6 +138,26 @@ curl http://127.0.0.1:8000/api/v1/trips/1
 {"id":1,...}
 ```
 
+### Update trip budget
+
+Only the `budget` field is mutable. Updating it recomputes `daily_budget`, `category`, `recommended_places`, and `recommended_transportation`. `created_at` is server-generated and strictly immutable.
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/v1/trips/1 -H "Content-Type: application/json" -d '{"budget":700}'
+```
+
+```json
+{"id":1,"destination":"Japan","country":"Japan","days":5,"budget":700.0,"currency":"USD","travel_month":"December","daily_budget":140.0,"travel_season":"Peak Season","category":"Backpacker","recommended_places":["Tokyo Tower","Shibuya","Mount Fuji"],"recommended_transportation":"Bus","created_at":"2026-08-20T11:00:00+00:00"}
+```
+
+### Delete a trip
+
+```bash
+curl -i -X DELETE http://127.0.0.1:8000/api/v1/trips/1
+```
+
+HTTP 204 No Content with an empty body.
+
 ### Recommended places
 
 ```bash
@@ -173,6 +193,12 @@ After `uvicorn` starts once and create `trips` table, you can verify:
 1. Note the `id` and `created_at` of a successfully POSTed trip.
 2. Stop and restart `uvicorn` with the same `.env`.
 3. `GET /api/v1/trips/{id}` with the captured ID. The response is identical to the original, including `created_at`.
+
+## Known Limitations
+
+- PUT and DELETE are available for trip budgets, but there is no `updated_at` tracking.
+- Schema changes require Alembic (no migration framework yet).
+- No frontend, authentication, or AI integration (Amazon Bedrock) yet.
 
 ## Tests
 

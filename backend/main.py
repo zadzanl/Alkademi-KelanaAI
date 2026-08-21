@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -62,6 +62,18 @@ class TripRequest(BaseModel):
     budget: float
     currency: str
     travel_month: str
+
+
+class TripUpdate(BaseModel):
+    """Budget update body.
+
+    Enforces `extra="forbid"` so any additional fields (e.g. `days`) are 
+    rejected with 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    budget: float
 
 
 class TripResponse(BaseModel):
@@ -177,3 +189,36 @@ def get_trip(trip_id: int, db: Session = Depends(get_db)) -> TripResponse:
         # 422 before reaching this branch.
         raise HTTPException(status_code=404, detail="Trip not found")
     return TripResponse.model_validate(row)
+
+
+@app.put("/api/v1/trips/{trip_id}", response_model=TripResponse)
+def update_trip_budget(
+    trip_id: int, update: TripUpdate, db: Session = Depends(get_db)
+) -> TripResponse:
+    """Update a trip's budget and recalc derived fields."""
+    row = db.get(Trip, trip_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    row.budget = update.budget
+    row.daily_budget = calculate_daily_budget(row.budget, row.days)
+    new_category = get_trip_category(row.budget)
+    row.category = new_category
+    row.recommended_places = get_recommended_places(new_category)
+    row.recommended_transportation = get_recommended_transportation(new_category)
+
+    db.commit()
+    db.refresh(row)
+    return TripResponse.model_validate(row)
+
+
+@app.delete("/api/v1/trips/{trip_id}")
+def delete_trip(trip_id: int, db: Session = Depends(get_db)) -> Response:
+    """Delete a trip and return a 204 response."""
+    row = db.get(Trip, trip_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)

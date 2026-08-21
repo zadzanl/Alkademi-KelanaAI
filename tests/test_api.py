@@ -278,6 +278,91 @@ class TripApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_put_budget_recomputes_derived_fields(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request(budget=1500)).json()
+
+        response = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+
+        self.assertEqual(updated["budget"], 700.0)
+        self.assertEqual(updated["category"], "Backpacker")
+        self.assertEqual(updated["recommended_transportation"], "Bus")
+        self.assertEqual(updated["daily_budget"], 140.0)
+
+    def test_put_preserves_non_budget_fields(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+
+        updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700}).json()
+
+        for field in ("id", "destination", "country", "days", "currency", "travel_month", "travel_season", "created_at"):
+            self.assertEqual(updated[field], created[field])
+
+    def test_put_missing_budget_returns_422(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+
+        response = self.client.put(f"/api/v1/trips/{created['id']}", json={})
+        self.assertEqual(response.status_code, 422)
+
+    def test_put_extra_fields_returns_422(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+
+        response = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700, "days": 3})
+        self.assertEqual(response.status_code, 422)
+
+    def test_put_unknown_id_returns_404(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        unknown_id = created["id"] + 1000
+
+        response = self.client.put(f"/api/v1/trips/{unknown_id}", json={"budget": 700})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "Trip not found"})
+
+    def test_put_non_integer_id_returns_422(self) -> None:
+        response = self.client.put("/api/v1/trips/abc", json={"budget": 700})
+        self.assertEqual(response.status_code, 422)
+
+    def test_delete_returns_204_empty_body(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+
+        response = self.client.delete(f"/api/v1/trips/{created['id']}")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b"")
+
+    def test_get_after_delete_returns_404(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        self.client.delete(f"/api/v1/trips/{created['id']}")
+
+        response = self.client.get(f"/api/v1/trips/{created['id']}")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "Trip not found"})
+
+    def test_list_after_delete_excludes_deleted(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        self.client.delete(f"/api/v1/trips/{created['id']}")
+
+        listing = self.client.get("/api/v1/trips").json()
+        self.assertNotIn(created["id"], [row["id"] for row in listing])
+
+    def test_delete_unknown_id_returns_404(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        unknown_id = created["id"] + 1000
+
+        response = self.client.delete(f"/api/v1/trips/{unknown_id}")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "Trip not found"})
+
+    def test_repeated_delete_returns_404(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        self.client.delete(f"/api/v1/trips/{created['id']}")
+
+        response = self.client.delete(f"/api/v1/trips/{created['id']}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_non_integer_id_returns_422(self) -> None:
+        response = self.client.delete("/api/v1/trips/abc")
+        self.assertEqual(response.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()
