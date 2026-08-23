@@ -6,3 +6,4 @@ httpx==0.28.1
 SQLAlchemy==2.0.52
 psycopg[binary]==3.3.4
 python-dotenv==1.2.3
+boto3==1.43.4
