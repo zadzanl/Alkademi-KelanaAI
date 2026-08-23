@@ -1,8 +1,17 @@
 """Database connection and session ownership for KelanaAI.
 
-Status: active | Phase: Documentation pass over implemented Phase 1 trip persistence (PostgreSQL-unverified) | Sprint: week-2 | Last modified: 2026-08-20
-Agent notes: Owns environment loading, the SQLAlchemy `Base`, the lazily bound session factory, `init_db()`, and the request-scoped `get_db()` dependency. No PostgreSQL runtime has been verified in this session.
-Insights: `Base.metadata.create_all()` is **create-only**: it creates the `trips` table when missing, but it does **not** structurally migrate an existing table. Any future schema change to `trips` therefore requires a separate, approved Alembic migration change first; Alembic is the documented upgrade path, not currently installed. URLs in error messages and examples intentionally use only a redacted placeholder shape, never an operator-supplied password or expanded URL. The redacted `postgresql+psycopg://<user>:<password>@127.0.0.1:5432/<db>` form is the only safe pattern in this module.
+Owns environment loading, the SQLAlchemy `Base`, the lazy-bound session factory,
+`init_db()`, and request-scoped `get_db()` dependency. 
+Live PostgreSQL runtime is verified (the full `unittest` suite 
+and live e2e POST/GET/PUT/DELETE run against the local `kelanaai` database).
+`Base.metadata.create_all()` is **create-only**: 
+it creates `trips` table when missing, 
+but it does **not** structurally migrate an existing table. 
+Any schema change to `trips` therefore requires a separate, manual, ALTER TABLE 
+`ai_recommendation` was added via 
+`ALTER TABLE trips ADD COLUMN IF NOT EXISTS ai_recommendation TEXT;`. 
+URLs in error messages and intentionally use a redacted placeholder shape, 
+an operator-supplied password or expanded URL is never shown. 
 """
 
 import os

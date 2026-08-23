@@ -1,14 +1,13 @@
 """Regression tests for the KelanaAI REST API.
 
-Status: active | Phase: trip persistence | Last modified: 2026-08-20
-Insights: Tests target the real configured local PostgreSQL database; rows
-are cleaned before and after each test; IDs are captured from POST
-responses and used instead of any fixed sequence value. Phase 1 covers
+Tests target the real configured local PostgreSQL database; rows are cleaned 
+before and after each test; IDs are captured from POST responses. Phase 1 covers
 durable create plus reads. Phase 2 (PUT/DELETE) extends this file.
 """
 
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -32,6 +31,9 @@ class TripApiTests(unittest.TestCase):
         cls.client.__exit__(None, None, None)
 
     def setUp(self) -> None:
+        self.ai_patch = patch("backend.main.get_ai_recommendation", return_value="## Trip plan")
+        self.ai_mock = self.ai_patch.start()
+        self.addCleanup(self.ai_patch.stop)
         # Every test starts with an empty table.
         self._truncate_trips()
         # Even if an assertion fails, leave the table empty for the next test.
@@ -113,11 +115,13 @@ class TripApiTests(unittest.TestCase):
             "recommended_places",
             "recommended_transportation",
             "created_at",
+            "ai_recommendation",
         }
         self.assertEqual(set(body.keys()), expected_keys)
 
         # Dynamic fields: type/format only, no exact value.
         self.assertIsInstance(body["id"], int)
+        self.assertTrue(body["ai_recommendation"] is None or isinstance(body["ai_recommendation"], str))
         self.assertGreater(body["id"], 0)
         self.assertIsInstance(self._parse_iso(body["created_at"]), datetime)
 
@@ -295,8 +299,50 @@ class TripApiTests(unittest.TestCase):
 
         updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700}).json()
 
-        for field in ("id", "destination", "country", "days", "currency", "travel_month", "travel_season", "created_at"):
+        for field in ("id", "destination", "country", "days", "currency", "travel_month", "travel_season", "created_at", "ai_recommendation"):
             self.assertEqual(updated[field], created[field])
+
+    def test_ai_failure_still_creates_trip_with_null(self) -> None:
+        self.ai_mock.return_value = None
+        response = self.client.post("/api/v1/trips", json=self.valid_request())
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["ai_recommendation"])
+
+    def test_put_preserves_ai_recommendation_without_invocation(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        self.ai_mock.reset_mock()
+        updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["ai_recommendation"], created["ai_recommendation"])
+        self.ai_mock.assert_not_called()
+
+    def test_put_preserves_null_ai_recommendation_without_invocation(self) -> None:
+        self.ai_mock.return_value = None
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        self.assertIsNone(created["ai_recommendation"])
+        self.ai_mock.reset_mock()
+        updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
+        self.assertEqual(updated.status_code, 200)
+        self.assertIsNone(updated.json()["ai_recommendation"])
+        self.ai_mock.assert_not_called()
+
+    def test_string_max_lengths_are_rejected(self) -> None:
+        for field, value in (("destination", "x" * 101), ("country", "x" * 101),
+                             ("currency", "x" * 11), ("travel_month", "x" * 21)):
+            with self.subTest(field=field):
+                response = self.client.post("/api/v1/trips", json=self.valid_request(**{field: value}))
+                self.assertEqual(response.status_code, 422)
+
+    def test_openapi_exposes_ai_field_and_lengths(self) -> None:
+        schema = self.client.get("/openapi.json").json()
+        components = schema["components"]["schemas"]
+        response_schema = components["TripResponse"]
+        self.assertIn("ai_recommendation", response_schema["properties"])
+        ai_schema = response_schema["properties"]["ai_recommendation"]
+        self.assertTrue(ai_schema.get("nullable") or "anyOf" in ai_schema)
+        request_schema = components["TripRequest"]["properties"]
+        for field, length in (("destination", 100), ("country", 100), ("currency", 10), ("travel_month", 20)):
+            self.assertEqual(request_schema[field]["maxLength"], length)
 
     def test_put_missing_budget_returns_422(self) -> None:
         created = self.client.post("/api/v1/trips", json=self.valid_request()).json()

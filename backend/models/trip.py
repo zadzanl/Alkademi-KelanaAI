@@ -1,11 +1,13 @@
 """ORM mapping for the `trips` table.
 
-Status: active | Phase: Documentation pass over implemented Phase 1 trip persistence (PostgreSQL-unverified) | Sprint: week-2 | Last modified: 2026-08-20
-Agent notes: This module maps one persisted trip snapshot to `trips` and contains no engine, session, or migration code. No PostgreSQL runtime has been verified in this session.
-Insights: See `backend.database` for the create-only schema-creation ceiling and the documented migration upgrade path.
+This module maps one trip snapshot to `trips` (14 columns, including the 
+nullable `ai_recommendation` TEXT) and contains no engine or session code. 
+PostgreSQL runtime is verified on `tests/` and tracked in AGENTS.md).
+See `backend.database` for the create-only schema-creation ceiling 
+and the documented manual `ALTER TABLE` migration path.
 """
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.sql import func
 
 from backend.database import Base
@@ -15,7 +17,8 @@ class Trip(Base):
     """One persisted trip snapshot.
 
     Stores six submitted inputs, five service-derived recommendation values,
-    and two values issued by the database itself. `id` and timezone-aware
+    and two values issued by the database itself, plus the nullable AI snapshot.
+    `id` and timezone-aware
     `created_at` are populated by the database, not by the API client; they
     appear on the persisted row only after commit/refresh, which is why
     `create_trip` reloads the row before building its response. See
@@ -37,6 +40,7 @@ class Trip(Base):
     category = Column(String, nullable=False)
     recommended_places = Column(JSON, nullable=False)
     recommended_transportation = Column(String, nullable=False)
+    ai_recommendation = Column(Text, nullable=True)
     # `server_default` means PostgreSQL stamps this timestamp using
     # `func.now()`; the application never supplies a value for this column.
     created_at = Column(

@@ -1,10 +1,20 @@
 """KelanaAI FastAPI application.
 
-Status: active | Phase: Documentation pass over implemented Phase 1 trip persistence (PostgreSQL-unverified) | Sprint: week-2 | Last modified: 2026-08-20
-Agent notes: This module owns the FastAPI API boundary. Phase 1 of trip persistence (durable POST and ordered list/detail reads) is implemented in this file, but no PostgreSQL runtime has been verified in this session.
-Insights: A POST request flows through five owned layers before its JSON response is sent. FastAPI/Pydantic validation runs first, then the unchanged deterministic service functions calculate the derived values, the handler builds one complete `Trip` snapshot, the request-scoped session persists it through `add`/`commit`/`refresh`, and `TripResponse.model_validate(record)` converts the refreshed ORM row into the public response shape.
+This module owns the FastAPI API boundary. 
+Durable trip persistence (POST, ordered list/detail reads, PUT, DELETE) 
+and AI recommendation generation (`ai_recommendation`). 
 
-This module does not own engine construction, session binding, schema lifecycle, or migration policy; those live in `backend.database`, and `backend.models.trip` owns the ORM mapping. Treat `openapi.json`/Swagger, the handler docstrings, and the `TripResponse` schema as the publicly visible response contract; treat the `#` comments and module/class docstrings around them as developer-facing.
+A POST request flows through five layers before its JSON response is sent. 
+FastAPI/Pydantic validation runs first, then the deterministic service functions 
+calculate the derived values. Trip handler builds one complete `Trip` snapshot, 
+the request-scoped session persists through `add`/`commit`/`refresh`.
+`TripResponse.model_validate(record)` converts row into public response shape.
+
+This module does not own engine construction, session binding, schema lifecycle, 
+or migration policy; those live in `backend.database`, and `backend.models.trip`
+owns the ORM mapping. Treat `openapi.json`/Swagger, the handler docstrings, 
+and the `TripResponse` schema as public-facing response contract; 
+treat the `#` comments and module/class docstrings as developer-facing.
 """
 
 from contextlib import asynccontextmanager
@@ -17,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db, init_db
 from backend.models.trip import Trip
+from backend.services.ai_service import get_ai_recommendation, log_ai_provider_config
 from backend.services.trip_service import (
     calculate_daily_budget,
     get_recommended_places,
@@ -36,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     creation; see `backend.database` for the schema-creation ceiling.
     """
     init_db()
+    log_ai_provider_config()
     yield
 
 
@@ -56,12 +68,12 @@ class TripRequest(BaseModel):
     execute; the handler can therefore assume `trip` is already valid.
     """
 
-    destination: str
-    country: str
+    destination: str = Field(max_length=100)
+    country: str = Field(max_length=100)
     days: int = Field(gt=0)
     budget: float
-    currency: str
-    travel_month: str
+    currency: str = Field(max_length=10)
+    travel_month: str = Field(max_length=20)
 
 
 class TripUpdate(BaseModel):
@@ -80,8 +92,9 @@ class TripResponse(BaseModel):
     """Stored trip snapshot returned by trip-resource routes.
 
     Includes the database-issued `id` and timezone-aware `created_at`
-    fields alongside the six submitted inputs and the five service-derived
-    values. `from_attributes=True` allows `TripResponse.model_validate(...)`
+    fields, the six submitted inputs, the five service-derived values, and
+    the nullable AI-generated `ai_recommendation` snapshot — fourteen fields
+    in total. `from_attributes=True` allows `TripResponse.model_validate(...)`
     to read ORM attributes directly; the handlers still call the explicit
     conversion so the response construction stays visible in the route.
     """
@@ -101,6 +114,7 @@ class TripResponse(BaseModel):
     recommended_places: list[str]
     recommended_transportation: str
     created_at: datetime
+    ai_recommendation: str | None
 
 
 @app.get("/")
@@ -159,6 +173,13 @@ def create_trip(
         category=category,
         recommended_places=get_recommended_places(category),
         recommended_transportation=get_recommended_transportation(category),
+    )
+    record.ai_recommendation = get_ai_recommendation(
+        destination=trip.destination, country=trip.country, days=trip.days,
+        budget=trip.budget, currency=trip.currency, travel_month=trip.travel_month,
+        category=category, recommended_places=record.recommended_places,
+        recommended_transportation=record.recommended_transportation,
+        travel_season=record.travel_season,
     )
     db.add(record)
     db.commit()
