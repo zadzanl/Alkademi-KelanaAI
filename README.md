@@ -20,8 +20,9 @@ kelana-ai/
 │   ├── test_api.py             # TestClient API regressions
 │   ├── test_trip_service.py    # Service regressions
 │   └── test_ai_service.py      # AI provider selection/parsing unit tests
-└── frontend/
-    └── .gitkeep                # Placeholder; no frontend yet
+└── frontend/                   # Next.js planner UI
+  ├── src/app/actions.ts      # Server Action; FastAPI stays server-to-server
+  └── scripts/focused-checks.ts
 ```
 
 ## Requirements
@@ -118,6 +119,37 @@ uvicorn backend.main:app --reload
 ```
 
 Check <http://127.0.0.1:8000/docs>; `GET /health` returns `{"status":"OK"}`.
+
+### 5. Run the frontend locally
+
+In a second PowerShell window:
+
+```powershell
+cd frontend
+npm ci
+Copy-Item .env.example .env.local
+# .env.local must contain: API_URL=http://127.0.0.1:8000
+npm run dev
+```
+
+The browser UI is at <http://localhost:3000>. `API_URL` is server-only; do not rename it to `NEXT_PUBLIC_API_URL` or put credentials in it. 
+
+For concurrent development, keep `uvicorn backend.main:app --reload` running in the repository-root window and `npm run dev` running from `frontend/`. Verify the API first with `Invoke-RestMethod http://127.0.0.1:8000/health`, which must return `status: OK`.
+
+If FastAPI is stopped, the planner keeps submitted values and shows a reachability error. Restart `uvicorn backend.main:app --reload`, confirm `/health`, then use **Try again**; no browser restart or data reset is required.
+
+Focused frontend checks use only Node 24's built-in test runner and the pinned TypeScript toolchain:
+
+```powershell
+cd frontend
+npm run check:focused
+npm run lint
+npm run build
+```
+
+`.agents/skills/impeccable/` and root `skills-lock.json` are intentionally local-only ignored tooling. This diverges from upstream tracking guidance so machine-specific agent skills and lock state are not product source; verify with `git check-ignore -v .agents/skills/impeccable/SKILL.md`.
+
+Before deployment, add authentication/authorization and rate limiting. The current unauthenticated Server Action/API path is suitable for local integration only and is not a deployment abuse boundary.
 
 ## API Examples
 
