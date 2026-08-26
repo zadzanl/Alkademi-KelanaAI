@@ -157,7 +157,7 @@ export async function createTrip(
         ok: false,
         kind: "timeout",
         message:
-          "That took longer than expected. Your details are saved here—try again when ready.",
+          "That took longer than expected. Your details are saved here. Try again when ready.",
         submitted,
       };
     }

@@ -31,7 +31,7 @@ export function localErrors(
 
   for (const key of ["destination", "country"] as const) {
     if (!values[key].trim()) {
-      errors[key] = "Please enter a destination.";
+      errors[key] = key === "country" ? "Please enter a country." : "Please enter a destination.";
     } else if (values[key].length > textLimits[key]) {
       errors[key] = "Keep this to 100 characters or fewer.";
     }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTrip } from "../src/app/actions.ts";
-import { localErrors, parse422, safeUrl } from "../src/app/safety.ts";
+import { createTrip } from "../frontend/src/app/actions.ts";
+import { localErrors, parse422, safeUrl } from "../frontend/src/app/safety.ts";
 
 const values = {
 	destination: "Kyoto",
@@ -156,4 +156,9 @@ test("renders hostile Markdown URLs inert by policy", () => {
 		safeUrl("https://example.com/image.png", true),
 		"https://example.com/image.png",
 	);
+});
+
+test("uses field-specific country validation copy", () => {
+
+	assert.equal(localErrors({ ...values, country: "" }).country, "Please enter a country.");
 });

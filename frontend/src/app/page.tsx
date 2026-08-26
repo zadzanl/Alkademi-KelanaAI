@@ -1,10 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- react-markdown supplies an already URL-scheme-validated image source. */
 
+import Image from "next/image";
 import { useActionState, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { createTrip } from "./actions";
 import { safeUrl } from "./safety";
+import { heroLandmark, indexLandmarks } from "./landmarks";
 import {
   initialForm,
   months,
@@ -14,7 +16,17 @@ import {
 } from "./types";
 
 const inputClass =
-  "mt-2 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-slate-900 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 disabled:bg-slate-100";
+  "mt-2 min-h-12 w-full rounded-[4px] border border-control bg-paper-light px-4 text-base text-ink outline-none transition-colors duration-150 focus-visible:border-indigo focus-visible:outline-indigo disabled:cursor-wait disabled:bg-paper disabled:text-muted-ink";
+
+const sampleFormValues: FormValues = { destination: "Kyoto", country: "Japan", days: "5", budget: "1500", currency: "USD", travel_month: "December" };
+
+function PendingSkeleton() {
+  return <div aria-hidden="true" className="space-y-5 border-y border-rule py-8 motion-safe:animate-pulse motion-reduce:animate-none"><div className="h-8 w-2/3 bg-rule/50" /><div className="h-4 w-full bg-rule/40" /><div className="h-4 w-5/6 bg-rule/40" /><div className="grid gap-4 sm:grid-cols-3"><div className="h-20 bg-rule/40" /><div className="h-20 bg-rule/40" /><div className="h-20 bg-rule/40" /></div></div>;
+}
+
+function LandmarkIndex() {
+  return <section aria-labelledby="landmarks-heading" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8"><div className="border-t border-ink pt-5"><h2 id="landmarks-heading" className="font-display text-4xl text-ink sm:text-5xl">Landmarks for future journeys</h2><p className="mt-4 max-w-[55ch] text-lg leading-8 text-muted-ink">A curated sampler of places to keep in mind. This is not a ranking or a recommendation generated from your trip.</p></div><ul className="mt-10 grid gap-x-8 gap-y-12 md:grid-cols-2">{indexLandmarks.map((landmark) => <li key={landmark.key}><figure><div className="relative aspect-[4/3] overflow-hidden bg-paper-light"><Image src={landmark.src} alt={landmark.alt} fill loading="lazy" sizes="(min-width: 768px) 50vw, 100vw" style={{ objectPosition: landmark.objectPosition }} className="object-cover" /></div><figcaption className="border-b border-rule bg-paper-light px-4 py-4"><p className="font-display text-2xl text-ink">{landmark.label}</p><p className="mt-2 text-sm text-muted-ink">{landmark.caption}. {landmark.credit}. <a href={landmark.source} className="underline">Source</a> · <a href={landmark.licenseUrl} className="underline">{landmark.license}</a> · {landmark.modification}</p></figcaption></figure></li>)}</ul></section>;
+}
 
 type FieldProps = {
   label: string;
@@ -43,7 +55,7 @@ function Field({
 
   return (
     <div>
-      <label htmlFor={id} className="font-semibold text-slate-800">
+      <label htmlFor={id} className="font-semibold text-ink">
         {label}
       </label>
       {children ? (
@@ -77,7 +89,7 @@ function Field({
       {error && (
         <p
           id={`${id}-error`}
-          className="mt-2 text-sm font-medium text-rose-700"
+          className="mt-2 text-sm font-semibold text-error"
           role="alert"
         >
           {error}
@@ -88,71 +100,71 @@ function Field({
 }
 
 function Results({ trip }: { trip: TripResponse }) {
-  const metrics = [
-    ["Total budget", `${trip.currency} ${trip.budget.toLocaleString()}`],
-    [
-      "Daily budget",
-      `${trip.currency} ${trip.daily_budget.toLocaleString()}`,
-    ],
-    ["Season", trip.travel_season],
-    ["Getting around", trip.recommended_transportation],
-  ];
-
   return (
-    <section aria-labelledby="results-heading" className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-bold uppercase tracking-[0.16em] text-teal-700">
-            Your route, mapped
-          </p>
+    <section aria-labelledby="results-heading" className="journal-reveal border-t border-ink pt-5">
+      <div className="grid gap-5 border-b border-rule pb-9 md:grid-cols-[1fr_auto] md:items-end">
+        <div className="min-w-0">
           <h2
             id="results-heading"
-            className="mt-2 text-3xl font-bold tracking-[-0.02em] text-slate-950"
+            className="font-display wrap-anywhere text-[clamp(2.75rem,7vw,4.5rem)] leading-[0.94] tracking-[-0.025em] text-ink"
           >
             {trip.destination}
           </h2>
-          <p className="mt-2 text-slate-600">
+          <p className="mt-4 text-lg text-muted-ink">
             {trip.days} days · {trip.travel_month} · {trip.country}
           </p>
         </div>
-        <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-900">
+        <span className="category-badge-chip w-fit rounded-full px-4 py-2 text-sm font-bold">
           {trip.category}
         </span>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {metrics.map(([label, value]) => (
-          <div
-            key={label}
-            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <p className="text-sm text-slate-600">{label}</p>
-            <p className="mt-2 font-bold text-slate-950">{value}</p>
-          </div>
-        ))}
+      <div className="grid gap-0 border-b border-rule lg:grid-cols-[1.35fr_0.8fr_0.65fr]">
+        <div className="min-w-0 py-9 lg:border-r lg:border-rule lg:pr-10">
+          <p className="text-sm font-semibold text-muted-ink">Total budget</p>
+          <p className="font-display tabular wrap-anywhere mt-3 text-[clamp(2.4rem,6vw,5rem)] leading-none text-terracotta-dark">
+            {trip.currency} {trip.budget.toLocaleString()}
+          </p>
+        </div>
+        <div className="min-w-0 border-t border-rule py-9 lg:border-r lg:border-t-0 lg:px-8">
+          <p className="text-sm font-semibold text-muted-ink">Daily budget</p>
+          <p className="tabular wrap-anywhere mt-3 text-2xl font-bold text-ink">
+            {trip.currency} {trip.daily_budget.toLocaleString()}
+          </p>
+        </div>
+        <div className="min-w-0 border-t border-rule py-9 lg:border-t-0 lg:pl-8">
+          <dl className="space-y-6">
+            <div>
+              <dt className="text-sm font-semibold text-muted-ink">Season</dt>
+              <dd className="wrap-anywhere mt-1 font-bold text-ink">{trip.travel_season}</dd>
+            </div>
+            <div>
+              <dt className="text-sm font-semibold text-muted-ink">Getting around</dt>
+              <dd className="wrap-anywhere mt-1 font-bold text-ink">{trip.recommended_transportation}</dd>
+            </div>
+          </dl>
+        </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="text-xl font-bold text-slate-950">
-            Places to keep close
-          </h3>
-          <ul className="mt-4 space-y-3">
-            {trip.recommended_places.map((place) => (
-              <li key={place} className="flex gap-3 text-slate-700">
-                <span className="text-teal-600" aria-hidden="true">
-                  ●
+      <div className="grid gap-12 py-12 lg:grid-cols-[0.65fr_1.35fr] lg:gap-20">
+        <div className="min-w-0">
+          <h3 className="font-display text-3xl leading-none text-ink">Places to keep close</h3>
+          <ol className="mt-7 border-t border-rule">
+            {trip.recommended_places.map((place, index) => (
+              <li key={place} className="wrap-anywhere grid grid-cols-[2rem_1fr] gap-3 border-b border-rule py-4 text-ink">
+                <span className="tabular text-sm font-bold text-terracotta-dark" aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
                 </span>
-                {place}
+                <span>{place}</span>
               </li>
             ))}
-          </ul>
+          </ol>
         </div>
 
-        <div className="rounded-2xl border border-teal-100 bg-teal-50/60 p-6 shadow-sm">
-          <h3 className="text-xl font-bold text-slate-950">AI itinerary</h3>
+        <div className="min-w-0 border-t border-ink pt-5">
+          <h3 className="font-display text-3xl leading-none text-ink">AI itinerary</h3>
           {trip.ai_recommendation ? (
-            <div className="prose prose-teal mt-4 max-w-none">
+            <div className="journal-prose prose mt-7 max-w-[72ch] text-ink">
               <ReactMarkdown
                 components={{
                   a: ({ href, children }) => {
@@ -176,9 +188,8 @@ function Results({ trip }: { trip: TripResponse }) {
               </ReactMarkdown>
             </div>
           ) : (
-            <p className="mt-4 rounded-xl bg-white/70 p-4 text-slate-700">
-              AI itinerary unavailable for this trip — deterministic summary
-              shown above.
+            <p className="mt-7 border-y border-rule bg-indigo-light px-5 py-4 text-indigo">
+              AI itinerary unavailable for this trip. Deterministic summary shown above.
             </p>
           )}
         </div>
@@ -189,10 +200,25 @@ function Results({ trip }: { trip: TripResponse }) {
 
 export default function Home() {
   const [values, setValues] = useState<FormValues>(initialForm);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [state, formAction, pending] = useActionState<
     ActionState | null,
     FormData
   >(createTrip, null);
+
+  useEffect(() => {
+    const current = (document.documentElement.getAttribute("data-theme") as "light" | "dark") || "light";
+    setTheme(current);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem("kelana_theme", next);
+    } catch {}
+  };
 
   useEffect(() => {
     if (state?.submitted) {
@@ -203,82 +229,100 @@ export default function Home() {
   const update = (name: keyof FormValues) => (value: string) =>
     setValues((current) => ({ ...current, [name]: value }));
   const errors = state?.ok === false ? state.fieldErrors : undefined;
+  const fillExample = () => setValues(sampleFormValues);
 
   return (
-    <div className="min-h-screen bg-[#f5f8f7] text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <nav
-          className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5"
-          aria-label="Primary"
-        >
-          <a
-            href="#top"
-            className="text-xl font-black tracking-[-0.03em] text-teal-800"
-          >
-            Kelana<span className="text-emerald-600">AI</span>
+    <div className="min-h-screen bg-paper text-ink">
+      <header className="border-b border-rule bg-paper">
+        <nav className="mx-auto flex max-w-[90rem] items-center justify-between px-5 py-5 sm:px-8" aria-label="Primary">
+          <a href="#top" className="font-display text-2xl text-ink hover:text-terracotta-dark">
+            Kelana<span className="text-terracotta-dark">AI</span>
           </a>
-          <div className="hidden gap-7 text-sm font-semibold text-slate-600 sm:flex">
-            <a href="#planner" className="hover:text-teal-700">
-              Plan a trip
-            </a>
-            <a href="#about" className="hover:text-teal-700">
-              About
-            </a>
+          <div className="flex shrink-0 items-center gap-4 sm:gap-7 text-sm font-semibold">
+            <a href="#planner" className="border-b border-terracotta pb-1 text-ink hover:text-terracotta-dark">Plan a trip</a>
+            <a href="#about" className="hidden text-muted-ink hover:text-ink sm:inline">About</a>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+              className="flex items-center gap-1.5 rounded-full border border-rule bg-paper-light px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-control hover:text-terracotta-dark"
+            >
+              {theme === "light" ? (
+                <>
+                  <svg className="h-3.5 w-3.5 text-terracotta" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                  </svg>
+                  <span>Dark</span>
+                </>
+              ) : (
+                <>
+                  <svg className="h-3.5 w-3.5 text-terracotta-dark" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                  <span>Light</span>
+                </>
+              )}
+            </button>
           </div>
         </nav>
       </header>
 
       <main id="top">
-        <section className="relative isolate overflow-hidden bg-slate-950">
-          <div
-            className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,#0f766e_0%,transparent_38%),linear-gradient(125deg,#082f49,#0f766e_65%,#064e3b)]"
-            aria-hidden="true"
-          />
-          <div className="relative mx-auto max-w-6xl px-5 py-20 sm:py-28">
-            <div className="max-w-2xl rounded-3xl bg-slate-950/70 p-7 shadow-2xl ring-1 ring-white/10 sm:p-10">
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-300">
-                Travel, considered
-              </p>
-              <h1 className="mt-4 text-4xl font-bold leading-tight tracking-[-0.03em] text-white sm:text-6xl">
+        <section className="journal-reveal mx-auto grid min-w-0 max-w-[90rem] px-5 pb-16 pt-12 sm:px-8 sm:pb-24 sm:pt-16 lg:grid-cols-12 lg:items-center lg:py-24">
+          <div className="min-w-0 lg:col-span-6">
+            <div className="bg-indigo px-6 py-10 text-white sm:px-10 sm:py-14 lg:px-12 lg:py-16">
+              <h1 className="font-display max-w-[11ch] text-[clamp(3.25rem,7vw,5.5rem)] leading-[0.91] tracking-[-0.03em]">
                 Go farther with a plan that feels like you.
               </h1>
-              <p className="mt-6 max-w-[65ch] text-lg leading-8 text-slate-200">
+              <p className="mt-7 max-w-[55ch] text-lg leading-8 text-slate-200 sm:text-xl">
                 Tell KelanaAI where you want to go, and get a grounded trip
                 snapshot for your next adventure.
               </p>
-              <div className="mt-8 flex flex-wrap gap-2 text-sm font-semibold text-white">
-                <span className="rounded-full bg-white/15 px-4 py-2">
-                  Bali
-                </span>
-                <span className="rounded-full bg-white/15 px-4 py-2">
-                  Labuan Bajo
-                </span>
-                <span className="rounded-full bg-white/15 px-4 py-2">
-                  Tokyo
-                </span>
-              </div>
+              <a href="#planner" className="mt-9 inline-block min-h-12 border-b border-white py-3 font-bold text-white hover:text-slate-200">Plan a trip</a>
             </div>
           </div>
+          <figure className="min-w-0 bg-paper-light lg:col-span-6">
+            <div className="relative min-h-[20rem] overflow-hidden lg:min-h-[34rem]">
+              <Image
+                src={heroLandmark.src}
+                alt={heroLandmark.alt}
+                fill
+                priority
+                sizes="(min-width: 1440px) 720px, (min-width: 1024px) 50vw, 100vw"
+                style={{ objectPosition: heroLandmark.objectPosition }}
+                className="object-cover"
+              />
+            </div>
+            <figcaption className="flex flex-wrap justify-between gap-x-4 gap-y-1 px-4 py-3 text-xs text-muted-ink">
+              <span>{heroLandmark.caption}</span>
+              <span>
+                {heroLandmark.credit}{" · "}
+                <a href={heroLandmark.source} className="underline hover:text-ink" rel="noreferrer">Source</a>
+                {" · "}
+                <a href={heroLandmark.licenseUrl} className="underline hover:text-ink" rel="noreferrer">{heroLandmark.license}</a>
+                {" · "}{heroLandmark.modification}
+              </span>
+            </figcaption>
+          </figure>
         </section>
 
         <section
           id="planner"
-          className="mx-auto grid max-w-6xl gap-10 px-5 py-14 lg:grid-cols-[0.8fr_1.2fr] lg:py-20"
+          aria-labelledby="planner-heading"
+          className="mx-auto grid max-w-6xl gap-10 px-5 py-16 sm:px-8 lg:grid-cols-[0.68fr_1.32fr] lg:gap-20 lg:py-24"
         >
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.16em] text-teal-700">
-              Start with the essentials
-            </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-[-0.02em] text-slate-950">
+            <h2 id="planner-heading" className="font-display text-4xl leading-[1.02] text-ink sm:text-5xl">
               Build your trip snapshot
             </h2>
-            <p className="mt-4 max-w-[65ch] leading-7 text-slate-700">
+            <p className="mt-6 max-w-[48ch] text-lg leading-8 text-muted-ink">
               A few details are enough to shape a useful first direction. You
               can adjust the plan later.
             </p>
+            <button type="button" disabled={pending} onClick={fillExample} className="mt-6 min-h-12 border-b border-terracotta font-bold text-terracotta-dark disabled:opacity-50">Try an example</button>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-md sm:p-8">
+          <div className="border-t border-ink bg-paper-light px-5 py-7 sm:px-8 sm:py-9">
             <form action={formAction} className="space-y-6">
               <div className="grid gap-5 md:grid-cols-2">
                 <Field
@@ -356,16 +400,14 @@ export default function Home() {
 
               <button
                 disabled={pending}
-                className="min-h-12 w-full rounded-xl bg-teal-700 px-5 font-bold text-white shadow-sm transition hover:bg-teal-800 focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+                className="min-h-12 w-full rounded-[4px] bg-terracotta px-5 font-bold text-white transition-colors duration-150 hover:bg-terracotta-dark focus-visible:outline-indigo disabled:cursor-wait disabled:bg-control disabled:text-white"
               >
-                {pending
-                  ? "Generating your itinerary..."
-                  : "✨ Generate AI Itinerary"}
+                {pending ? "Generating your itinerary..." : "Plan my trip"}
               </button>
 
               {pending && (
                 <div
-                  className="motion-safe:animate-pulse rounded-xl bg-slate-100 p-4 text-center text-sm font-semibold text-slate-700 motion-reduce:animate-none"
+                  className="border-y border-control bg-indigo-light p-4 text-center text-sm font-semibold text-indigo"
                   aria-live="polite"
                 >
                   Generating your itinerary...
@@ -374,7 +416,7 @@ export default function Home() {
 
               {state?.ok === false && (
                 <div
-                  className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-900"
+                  className="border-y border-error bg-paper p-4 text-error"
                   role="alert"
                 >
                   <p className="font-bold">{state.message}</p>
@@ -382,7 +424,7 @@ export default function Home() {
                     <button
                       disabled={pending}
                       formAction={formAction}
-                      className="mt-3 font-bold underline underline-offset-4"
+                      className="mt-3 min-h-12 font-bold underline underline-offset-4"
                     >
                       Try again
                     </button>
@@ -393,38 +435,41 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-5 pb-20">
-          {state?.ok ? (
+        <section aria-label="Trip output" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8">
+          {state?.ok && !pending ? (
             <Results trip={state.trip} />
           ) : (
-            !pending && (
-              <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 px-6 py-12 text-center">
-                <h2 className="text-2xl font-bold text-slate-950">
-                  Your next good idea starts here.
+            pending ? <PendingSkeleton /> : (
+              <div className="grid gap-8 border-y border-ink py-10 md:grid-cols-[0.35fr_1fr] md:py-14">
+                <p className="tabular text-sm font-semibold text-terracotta-dark" aria-hidden="true">02</p>
+                <div>
+                <h2 className="font-display text-3xl leading-tight text-ink sm:text-4xl">
+                  Your trip snapshot will appear here.
                 </h2>
-                <p className="mx-auto mt-3 max-w-[65ch] text-slate-600">
-                  Complete the form above and your trip summary will appear in
-                  this space.
+                <p className="mt-5 max-w-[65ch] text-lg leading-8 text-muted-ink">
+                  You’ll receive a travel style, daily budget, season, transportation, suggested places, and an AI narrative when available.
                 </p>
+                </div>
               </div>
             )
           )}
         </section>
+        <LandmarkIndex />
       </main>
 
       <footer
         id="about"
-        className="border-t border-slate-200 bg-slate-950 text-slate-300"
+        className="bg-indigo text-slate-300"
       >
-        <div className="mx-auto flex max-w-6xl flex-col gap-5 px-5 py-10 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
+        <div className="mx-auto grid max-w-[90rem] gap-8 px-5 py-12 sm:px-8 md:grid-cols-[1fr_auto_auto] md:items-end">
           <div>
-            <p className="font-bold text-white">KelanaAI</p>
-            <p className="mt-1 text-sm">
+            <p className="font-display text-3xl text-white">KelanaAI</p>
+            <p className="mt-2 text-sm">
               AI-Powered Indonesian &amp; Global Travel Planner
             </p>
           </div>
           <nav
-            className="flex justify-center gap-5 text-sm"
+            className="flex gap-5 text-sm"
             aria-label="Footer"
           >
             <a href="#planner" className="hover:text-white">

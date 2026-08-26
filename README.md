@@ -132,7 +132,7 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-The browser UI is at <http://localhost:3000>. `API_URL` is server-only; do not rename it to `NEXT_PUBLIC_API_URL` or put credentials in it. 
+The browser UI is at <http://localhost:3000>. `API_URL` is server-only; do not rename it to `NEXT_PUBLIC_API_URL` or put credentials in it.
 
 For concurrent development, keep `uvicorn backend.main:app --reload` running in the repository-root window and `npm run dev` running from `frontend/`. Verify the API first with `Invoke-RestMethod http://127.0.0.1:8000/health`, which must return `status: OK`.
 
@@ -147,7 +147,21 @@ npm run lint
 npm run build
 ```
 
+The implemented interface uses Instrument Serif for display text and Source Sans 3 for body/interface text. Non-null AI recommendations are rendered as provider-agnostic Markdown with raw HTML disabled and link/image URL schemes filtered. The current bundled Borobudur hero is local; the approved seven-addition static landmark index remains pending its per-file provenance and derivative gates.
+
 `.agents/skills/impeccable/` and root `skills-lock.json` are intentionally local-only ignored tooling. This diverges from upstream tracking guidance so machine-specific agent skills and lock state are not product source; verify with `git check-ignore -v .agents/skills/impeccable/SKILL.md`.
+
+### Local planning authority for the active frontend revision
+
+This workspace deliberately ignores `openspec/` and `AGENTS.md`; they are local planning state and are not distributed by a normal clone or shown in a PR diff. The active canonical contract is `openspec/changes/add-nextjs-frontend/artifacts/design-revision-final-plan.md`. Its reconciled normative files are `proposal.md`, `design.md`, `tasks.md`, and `specs/trip-ui/spec.md` under that change, with Phase 0 evidence in `artifacts/implementation-003-doc-reconciliation.md`. A contributor working from a fresh clone must obtain or recreate that local planning state before continuing the revision rather than inferring the contract from source alone.
+
+From the repository root, verify the local contract and tracked diff with:
+
+```powershell
+openspec validate add-nextjs-frontend --type change --strict --no-interactive
+git diff --check
+git diff --exit-code -- backend
+```
 
 Before deployment, add authentication/authorization and rate limiting. The current unauthenticated Server Action/API path is suitable for local integration only and is not a deployment abuse boundary.
 
@@ -279,7 +293,8 @@ After `uvicorn` starts once and create `trips` table, you can verify:
 - Schema changes require a manual `ALTER TABLE` (no migration framework yet); `create_all` is create-only.
 - AI inference is synchronous with a 15-second provider timeout on `POST /api/v1/trips`; the call runs before the trip row is persisted. No retries, runtime failover, or streaming.
 - The AI prompt (should) includes an injection-isolation instruction (via Openrouter's built-in filters).
-- No frontend, authentication, or chatbot (the conversational assistant is a future phase). Markdown rendering in the frontend is deferred.
+- The frontend planner is implemented, including safe Markdown rendering and one local Borobudur hero. The approved seven-addition static landmark index is not yet implemented or rights-cleared.
+- There is no authentication or chatbot; the conversational assistant and deployment-grade abuse controls remain future work.
 
 ## Tests
 
@@ -301,4 +316,5 @@ python -m unittest discover -s tests -p "test_api.py" -v
 - `v0.2.0` — Holiday season classification.
 - `v0.3.0` — FastAPI REST cut-over committed as `dfafa81` (untagged).
 - `v0.4.0` — PostgreSQL persistence plus ordered reads.
-- `v0.5.0` — Current working change: AI recommendation column (`ai_recommendation`) via OpenRouter/Bedrock.
+- `v0.5.0` — AI recommendation column (`ai_recommendation`) via OpenRouter/Bedrock.
+- Active untagged change — Next.js frontend and its approved final design revision.
