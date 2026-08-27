@@ -1,18 +1,16 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- react-markdown supplies an already URL-scheme-validated image source. */
 
 import Image from "next/image";
+import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { createTrip } from "./actions";
-import { safeUrl } from "./safety";
 import { heroLandmark, indexLandmarks } from "./landmarks";
+import { TripDetailView } from "../components/TripDetailView";
 import {
   initialForm,
   months,
   type ActionState,
   type FormValues,
-  type TripResponse,
 } from "./types";
 
 const inputClass =
@@ -99,105 +97,6 @@ function Field({
   );
 }
 
-function Results({ trip }: { trip: TripResponse }) {
-  return (
-    <section aria-labelledby="results-heading" className="journal-reveal border-t border-ink pt-5">
-      <div className="grid gap-5 border-b border-rule pb-9 md:grid-cols-[1fr_auto] md:items-end">
-        <div className="min-w-0">
-          <h2
-            id="results-heading"
-            className="font-display wrap-anywhere text-[clamp(2.75rem,7vw,4.5rem)] leading-[0.94] tracking-[-0.025em] text-ink"
-          >
-            {trip.destination}
-          </h2>
-          <p className="mt-4 text-lg text-muted-ink">
-            {trip.days} days · {trip.travel_month} · {trip.country}
-          </p>
-        </div>
-        <span className="category-badge-chip w-fit rounded-full px-4 py-2 text-sm font-bold">
-          {trip.category}
-        </span>
-      </div>
-
-      <div className="grid gap-0 border-b border-rule lg:grid-cols-[1.35fr_0.8fr_0.65fr]">
-        <div className="min-w-0 py-9 lg:border-r lg:border-rule lg:pr-10">
-          <p className="text-sm font-semibold text-muted-ink">Total budget</p>
-          <p className="font-display tabular wrap-anywhere mt-3 text-[clamp(2.4rem,6vw,5rem)] leading-none text-terracotta-dark">
-            {trip.currency} {trip.budget.toLocaleString()}
-          </p>
-        </div>
-        <div className="min-w-0 border-t border-rule py-9 lg:border-r lg:border-t-0 lg:px-8">
-          <p className="text-sm font-semibold text-muted-ink">Daily budget</p>
-          <p className="tabular wrap-anywhere mt-3 text-2xl font-bold text-ink">
-            {trip.currency} {trip.daily_budget.toLocaleString()}
-          </p>
-        </div>
-        <div className="min-w-0 border-t border-rule py-9 lg:border-t-0 lg:pl-8">
-          <dl className="space-y-6">
-            <div>
-              <dt className="text-sm font-semibold text-muted-ink">Season</dt>
-              <dd className="wrap-anywhere mt-1 font-bold text-ink">{trip.travel_season}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-semibold text-muted-ink">Getting around</dt>
-              <dd className="wrap-anywhere mt-1 font-bold text-ink">{trip.recommended_transportation}</dd>
-            </div>
-          </dl>
-        </div>
-      </div>
-
-      <div className="grid gap-12 py-12 lg:grid-cols-[0.65fr_1.35fr] lg:gap-20">
-        <div className="min-w-0">
-          <h3 className="font-display text-3xl leading-none text-ink">Places to keep close</h3>
-          <ol className="mt-7 border-t border-rule">
-            {trip.recommended_places.map((place, index) => (
-              <li key={place} className="wrap-anywhere grid grid-cols-[2rem_1fr] gap-3 border-b border-rule py-4 text-ink">
-                <span className="tabular text-sm font-bold text-terracotta-dark" aria-hidden="true">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span>{place}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-
-        <div className="min-w-0 border-t border-ink pt-5">
-          <h3 className="font-display text-3xl leading-none text-ink">AI itinerary</h3>
-          {trip.ai_recommendation ? (
-            <div className="journal-prose prose mt-7 max-w-[72ch] text-ink">
-              <ReactMarkdown
-                components={{
-                  a: ({ href, children }) => {
-                    const safe = href ? safeUrl(href) : undefined;
-                    return safe ? (
-                      <a href={safe} rel="noreferrer">
-                        {children}
-                      </a>
-                    ) : (
-                      <span>{children}</span>
-                    );
-                  },
-                  img: ({ src, alt }) => {
-                    const safe =
-                      typeof src === "string" ? safeUrl(src, true) : undefined;
-                    return safe ? <img src={safe} alt={alt ?? ""} /> : null;
-                  },
-                }}
-              >
-                {trip.ai_recommendation}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <p className="mt-7 border-y border-rule bg-indigo-light px-5 py-4 text-indigo">
-              AI itinerary unavailable for this trip. Deterministic summary shown above.
-            </p>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function Home() {
   const [values, setValues] = useState<FormValues>(initialForm);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -240,6 +139,7 @@ export default function Home() {
           </a>
           <div className="flex shrink-0 items-center gap-4 sm:gap-7 text-sm font-semibold">
             <a href="#planner" className="border-b border-terracotta pb-1 text-ink hover:text-terracotta-dark">Plan a trip</a>
+            <Link href="/trips" className="text-muted-ink hover:text-ink transition-colors">My Trips</Link>
             <a href="#about" className="hidden text-muted-ink hover:text-ink sm:inline">About</a>
             <button
               type="button"
@@ -437,7 +337,11 @@ export default function Home() {
 
         <section aria-label="Trip output" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8">
           {state?.ok && !pending ? (
-            <Results trip={state.trip} />
+            <TripDetailView
+              trip={state.trip}
+              headingLevel="h2"
+              showBackLink={false}
+            />
           ) : (
             pending ? <PendingSkeleton /> : (
               <div className="grid gap-8 border-y border-ink py-10 md:grid-cols-[0.35fr_1fr] md:py-14">

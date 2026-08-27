@@ -1,8 +1,9 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
-  /* Light Mode: Alpine Spruce & Glacial Slate */
   --paper: #f5f7fa;
   --paper-light: #ffffff;
   --ink: #0f172a;
