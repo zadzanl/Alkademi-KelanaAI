@@ -1,34 +1,28 @@
 """ORM mapping for the `trips` table.
 
-This module maps one trip snapshot to `trips` (14 columns, including the 
-nullable `ai_recommendation` TEXT) and contains no engine or session code. 
-PostgreSQL runtime is verified on `tests/` and tracked in AGENTS.md).
-See `backend.database` for the create-only schema-creation ceiling 
-and the documented manual `ALTER TABLE` migration path.
+This module maps one owner-scoped trip snapshot to `trips` (15 columns, including
+user_id foreign key and nullable `ai_recommendation` TEXT) and contains no engine
+or session code. PostgreSQL runtime is verified on `tests/` and tracked in AGENTS.md.
+See `backend.database` and `backend.migrations` for schema migration and backfill.
 """
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from backend.database import Base
 
 
 class Trip(Base):
-    """One persisted trip snapshot.
+    """One persisted trip snapshot scoped to a user account.
 
-    Stores six submitted inputs, five service-derived recommendation values,
-    and two values issued by the database itself, plus the nullable AI snapshot.
-    `id` and timezone-aware
-    `created_at` are populated by the database, not by the API client; they
-    appear on the persisted row only after commit/refresh, which is why
-    `create_trip` reloads the row before building its response. See
-    `backend.database` for the create-only schema-creation ceiling and the
-    documented migration upgrade path.
+    Stores owner user_id, six submitted inputs, five service-derived recommendation
+    values, database-issued `id` and `created_at`, plus nullable AI snapshot.
     """
 
     __tablename__ = "trips"
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE", name="fk_trips_user_id"), nullable=False, index=True)
     destination = Column(String, nullable=False)
     country = Column(String, nullable=False)
     days = Column(Integer, nullable=False)
@@ -47,4 +41,8 @@ class Trip(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_trips_user_id_id", "user_id", "id"),
     )

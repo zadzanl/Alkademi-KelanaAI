@@ -281,13 +281,16 @@ def me(user: User = Depends(current_user)) -> PublicUser:
 
 @app.post("/api/v1/trips", response_model=TripResponse)
 def create_trip(
-    trip: TripRequest, db: Session = Depends(get_db)
+    trip: TripRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> TripResponse:
-    """Save a trip snapshot and return the full stored snapshot.
+    """Save an owner-scoped trip snapshot and return the full stored snapshot.
 
     Persists the deterministic trip snapshot computed from the validated
     request and returns the complete stored record, including the
-    database-issued `id` and `created_at` values.
+    database-issued `id` and `created_at` values, stamping the authenticated
+    user ID on the server.
     """
     # FastAPI invokes `get_db()` for this request and yields one SQLAlchemy
     # session that is closed automatically once the response is sent; the
@@ -297,6 +300,7 @@ def create_trip(
     # above produce derived values; everything below builds the complete
     # `Trip` row that will be persisted.
     record = Trip(
+        user_id=user.id,
         destination=trip.destination,
         country=trip.country,
         days=trip.days,
@@ -328,19 +332,21 @@ def create_trip(
 def list_trips(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> TripListResponse:
-    """Return one newest-first page of persisted trip snapshots.
+    """Return one newest-first page of persisted trip snapshots for the current user.
 
     Offset pagination becomes slower at very large offsets. If trip volume
     reaches that ceiling, replace it with keyset pagination (`id < cursor`).
     """
-    total = db.query(Trip).count()
+    total = db.query(Trip).filter(Trip.user_id == user.id).count()
     offset = (page - 1) * page_size
     rows = []
     if offset < total:
         rows = (
             db.query(Trip)
+            .filter(Trip.user_id == user.id)
             .order_by(Trip.id.desc())
             .offset(offset)
             .limit(page_size)
@@ -356,9 +362,13 @@ def list_trips(
 
 
 @app.get("/api/v1/trips/{trip_id}", response_model=TripResponse)
-def get_trip(trip_id: int, db: Session = Depends(get_db)) -> TripResponse:
-    """Return one stored trip, or 404 if no trip has that ID."""
-    row = db.get(Trip, trip_id)
+def get_trip(
+    trip_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> TripResponse:
+    """Return one stored trip belonging to the current user, or 404."""
+    row = db.query(Trip).filter(Trip.id == trip_id, Trip.user_id == user.id).first()
     if row is None:
         # The exact envelope below matches the trip-persistence contract;
         # a non-integer `trip_id` path segment is rejected by FastAPI with
@@ -369,10 +379,13 @@ def get_trip(trip_id: int, db: Session = Depends(get_db)) -> TripResponse:
 
 @app.put("/api/v1/trips/{trip_id}", response_model=TripResponse)
 def update_trip_budget(
-    trip_id: int, update: TripUpdate, db: Session = Depends(get_db)
+    trip_id: int,
+    update: TripUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> TripResponse:
-    """Update a trip's budget and recalc derived fields."""
-    row = db.get(Trip, trip_id)
+    """Update an owned trip's budget and recalc derived fields."""
+    row = db.query(Trip).filter(Trip.id == trip_id, Trip.user_id == user.id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Trip not found")
 
@@ -389,9 +402,13 @@ def update_trip_budget(
 
 
 @app.delete("/api/v1/trips/{trip_id}")
-def delete_trip(trip_id: int, db: Session = Depends(get_db)) -> Response:
-    """Delete a trip and return a 204 response."""
-    row = db.get(Trip, trip_id)
+def delete_trip(
+    trip_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Delete an owned trip and return a 204 response."""
+    row = db.query(Trip).filter(Trip.id == trip_id, Trip.user_id == user.id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Trip not found")
 

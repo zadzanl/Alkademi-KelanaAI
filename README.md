@@ -279,14 +279,62 @@ After `uvicorn` starts once and create `trips` table, you can verify:
 2. Stop and restart `uvicorn` with the same `.env`.
 3. `GET /api/v1/trips/{id}` with the captured ID. The response is identical to the original, including `created_at`.
 
+## Database Migration & Legacy Backfill (scope-trips-to-users)
+
+The `trips` table now includes a non-null `user_id` foreign key referencing `users(id)` and a composite index on `(user_id, id)`.
+
+Migration operations are provided in `backend/migrations.py`:
+
+```python
+from backend.database import SessionLocal
+from backend.migrations import (
+    migrate_trips_schema,
+    verify_trips_ownership,
+    backfill_legacy_trips,
+    enforce_trips_user_id_non_null,
+    rollback_trips_user_id_migration,
+)
+
+db = SessionLocal()
+
+# 1. Add nullable user_id column, foreign key, and composite index
+migrate_trips_schema(db)
+
+# 2. Check ownership stats
+stats = verify_trips_ownership(db)
+print("Ownership status:", stats)
+
+# 3. Backfill legacy unowned trips to designated first account (e.g. target_user_id=1)
+if stats["unowned"] > 0:
+    backfilled = backfill_legacy_trips(db, target_user_id=1)
+    print(f"Backfilled {backfilled} legacy trips")
+
+# 4. Enforce NOT NULL constraint after verifying zero unowned rows
+enforce_trips_user_id_non_null(db)
+
+db.close()
+```
+
+### Rollback Runbook
+
+To roll back the `user_id` migration:
+
+```python
+from backend.database import SessionLocal
+from backend.migrations import rollback_trips_user_id_migration
+
+db = SessionLocal()
+rollback_trips_user_id_migration(db)
+db.close()
+```
+
 ## Known Limitations
 
 - PUT and DELETE are available for trip budgets, but there is no `updated_at` tracking.
-- Schema changes require a manual `ALTER TABLE` (no migration framework yet); `create_all` is create-only.
+- Schema changes require manual/runbook migrations via `backend/migrations.py` (no Alembic yet); `create_all` is create-only.
 - AI inference is synchronous with a 15-second provider timeout on `POST /api/v1/trips`; the call runs before the trip row is persisted. No retries, runtime failover, or streaming.
-- The AI prompt (should) includes an injection-isolation instruction (via Openrouter's built-in filters).
-- The frontend planner is implemented, including safe Markdown rendering and one local Borobudur hero. The approved seven-addition static landmark index is not yet implemented or rights-cleared.
-- There is no authentication or chatbot; the conversational assistant and deployment-grade abuse controls remain future work.
+- Authentication is phase-one prototype infrastructure (pseudonymous username/password, Argon2id, database session tokens). There is no rate limiting, password recovery, email verification, account deletion, or data export (not GDPR certified).
+- All trip CRUD operations (`POST`, `GET`, `GET /{id}`, `PUT /{id}`, `DELETE /{id}`) require an active authenticated session cookie (`kelana_session`). Unauthenticated requests return HTTP 401.
 
 ## Tests
 
@@ -296,10 +344,12 @@ Run all regressions from the repository root with the environment activated:
 python -m unittest discover -s tests -v
 ```
 
-Run only the API regressions:
+Run frontend focused checks and build from `frontend/`:
 
 ```bash
-python -m unittest discover -s tests -p "test_api.py" -v
+npm run check:focused
+npm run lint
+npm run build
 ```
 
 ## Release
@@ -309,4 +359,6 @@ python -m unittest discover -s tests -p "test_api.py" -v
 - `v0.3.0` — FastAPI REST cut-over committed as `dfafa81` (untagged).
 - `v0.4.0` — PostgreSQL persistence plus ordered reads.
 - `v0.5.0` — AI recommendation column (`ai_recommendation`) via OpenRouter/Bedrock.
-- Active untagged change — Next.js frontend and its approved final design revision.
+- `v0.6.0` — Phase-one User Authentication (`users` and `sessions` tables).
+- `v0.7.0` — Owner-Scoped Trips (`scope-trips-to-users`: private user history, migration & backfill runbook, cookie forwarding).
+

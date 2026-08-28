@@ -1,19 +1,30 @@
 """Regression tests for the KelanaAI REST API.
 
 Tests target the real configured local PostgreSQL database; rows are cleaned 
-before and after each test; IDs are captured from POST responses. Phase 1 covers
-durable create plus reads. Phase 2 (PUT/DELETE) extends this file.
+before and after each test; IDs are captured from POST responses. Tests verify
+owner-scoped trip CRUD operations, cross-user isolation, anonymous rejection,
+restart durability, legacy migration, and database cleanup.
 """
 
-import unittest
 from datetime import datetime
+import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from backend.database import SessionLocal
-from backend.main import app
+from backend.main import AUTH_COOKIE_NAME, app
+from backend.migrations import (
+    backfill_legacy_trips,
+    enforce_trips_user_id_non_null,
+    migrate_trips_schema,
+    rollback_trips_user_id_migration,
+    verify_trips_ownership,
+)
+from backend.models.session import Session as AuthSession
 from backend.models.trip import Trip
+from backend.models.user import User
 
 
 class TripApiTests(unittest.TestCase):
@@ -23,30 +34,50 @@ class TripApiTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         # Entering TestClient as a context manager runs the FastAPI lifespan,
         # which calls init_db() and creates the trips table.
-        cls.client = TestClient(app).__enter__()
+        cls.client = TestClient(app, base_url="https://testserver").__enter__()
 
     @classmethod
     def tearDownClass(cls) -> None:
-        # Close the lifespan context opened in setUpClass.
+        # Final cleanup and close lifespan context.
+        cls._truncate_all()
         cls.client.__exit__(None, None, None)
 
     def setUp(self) -> None:
         self.ai_patch = patch("backend.main.get_ai_recommendation", return_value="## Trip plan")
         self.ai_mock = self.ai_patch.start()
         self.addCleanup(self.ai_patch.stop)
-        # Every test starts with an empty table.
-        self._truncate_trips()
-        # Even if an assertion fails, leave the table empty for the next test.
-        self.addCleanup(self._truncate_trips)
+        self.client.cookies.clear()
+        # Every test starts with clean tables.
+        self._truncate_all()
+        # Even if an assertion fails, leave the tables empty for the next test.
+        self.addCleanup(self._truncate_all)
+        # Register and authenticate default user for standard tests.
+        self._register_and_login("default_user", "password123")
 
     @staticmethod
-    def _truncate_trips() -> None:
+    def _truncate_all() -> None:
         session = SessionLocal()
         try:
+            session.query(AuthSession).delete()
             session.query(Trip).delete()
+            session.query(User).delete()
             session.commit()
         finally:
             session.close()
+
+    def _register_and_login(
+        self, username: str = "default_user", password: str = "password123"
+    ) -> tuple[dict, str]:
+        self.client.post(
+            "/api/v1/auth/register",
+            json={"username": username, "password": password},
+        )
+        login_resp = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": username, "password": password},
+        )
+        token = login_resp.cookies.get(AUTH_COOKIE_NAME, "")
+        return login_resp.json(), token
 
     @staticmethod
     def valid_request(**overrides: object) -> dict[str, object]:
@@ -162,6 +193,7 @@ class TripApiTests(unittest.TestCase):
             "misc_cost",
             "total",
             "stdev",
+            "user_id",
         ):
             self.assertNotIn(removed_field, body)
 
@@ -430,9 +462,11 @@ class TripApiTests(unittest.TestCase):
         components = schema["components"]["schemas"]
         response_schema = components["TripResponse"]
         self.assertIn("ai_recommendation", response_schema["properties"])
+        self.assertNotIn("user_id", response_schema["properties"])
         ai_schema = response_schema["properties"]["ai_recommendation"]
         self.assertTrue(ai_schema.get("nullable") or "anyOf" in ai_schema)
         request_schema = components["TripRequest"]["properties"]
+        self.assertNotIn("user_id", request_schema)
         for field, length in (("destination", 100), ("country", 100), ("currency", 10), ("travel_month", 20)):
             self.assertEqual(request_schema[field]["maxLength"], length)
 
@@ -502,6 +536,267 @@ class TripApiTests(unittest.TestCase):
     def test_delete_non_integer_id_returns_422(self) -> None:
         response = self.client.delete("/api/v1/trips/abc")
         self.assertEqual(response.status_code, 422)
+
+    def test_anonymous_rejection_for_all_trip_routes(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        self.client.cookies.clear()
+
+        self.assertEqual(self.client.post("/api/v1/trips", json=self.valid_request()).status_code, 401)
+        self.assertEqual(self.client.get("/api/v1/trips").status_code, 401)
+        self.assertEqual(self.client.get(f"/api/v1/trips/{created['id']}").status_code, 401)
+        self.assertEqual(self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 500}).status_code, 401)
+        self.assertEqual(self.client.delete(f"/api/v1/trips/{created['id']}").status_code, 401)
+
+    def test_user_isolation_for_all_crud_operations(self) -> None:
+        # User A creates a trip
+        trip_a = self.client.post(
+            "/api/v1/trips",
+            json=self.valid_request(destination="Tokyo", budget=1500),
+        ).json()
+
+        # Register and switch to User B
+        self._register_and_login("user_b", "password123")
+
+        # User B creates their own trip
+        trip_b = self.client.post(
+            "/api/v1/trips",
+            json=self.valid_request(destination="Kyoto", budget=2000),
+        ).json()
+
+        # User B list only shows trip B
+        list_b = self.client.get("/api/v1/trips").json()
+        self.assertEqual(list_b["total"], 1)
+        self.assertEqual([t["id"] for t in list_b["items"]], [trip_b["id"]])
+
+        # User B cannot get User A's trip (404)
+        get_other = self.client.get(f"/api/v1/trips/{trip_a['id']}")
+        self.assertEqual(get_other.status_code, 404)
+        self.assertEqual(get_other.json(), {"detail": "Trip not found"})
+
+        # User B cannot update User A's trip (404)
+        put_other = self.client.put(f"/api/v1/trips/{trip_a['id']}", json={"budget": 5000})
+        self.assertEqual(put_other.status_code, 404)
+        self.assertEqual(put_other.json(), {"detail": "Trip not found"})
+
+        # User B cannot delete User A's trip (404)
+        del_other = self.client.delete(f"/api/v1/trips/{trip_a['id']}")
+        self.assertEqual(del_other.status_code, 404)
+        self.assertEqual(del_other.json(), {"detail": "Trip not found"})
+
+        # Switch back to User A
+        self.client.post("/api/v1/auth/login", json={"username": "default_user", "password": "password123"})
+
+        # User A list only shows trip A
+        list_a = self.client.get("/api/v1/trips").json()
+        self.assertEqual(list_a["total"], 1)
+        self.assertEqual([t["id"] for t in list_a["items"]], [trip_a["id"]])
+
+        # User A verifies trip A was unchanged by User B's rejected update
+        get_a = self.client.get(f"/api/v1/trips/{trip_a['id']}").json()
+        self.assertEqual(get_a["budget"], 1500.0)
+        self.assertEqual(get_a["category"], "Standard")
+
+        # User A can delete their own trip
+        self.assertEqual(self.client.delete(f"/api/v1/trips/{trip_a['id']}").status_code, 204)
+        self.assertEqual(self.client.get("/api/v1/trips").json()["total"], 0)
+
+    def test_client_cannot_inject_user_id_in_trip_creation(self) -> None:
+        req = self.valid_request(user_id=9999, owner="other_user")
+        resp = self.client.post("/api/v1/trips", json=req)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertNotIn("user_id", body)
+        self.assertNotIn("owner", body)
+
+        # Check in DB that user_id matches authenticated user
+        db = SessionLocal()
+        try:
+            row = db.query(Trip).filter(Trip.id == body["id"]).first()
+            user = db.query(User).filter(User.username == "default_user").first()
+            self.assertIsNotNone(row)
+            self.assertEqual(row.user_id, user.id)
+            self.assertNotEqual(row.user_id, 9999)
+        finally:
+            db.close()
+
+    def test_restart_durability_across_test_client_contexts(self) -> None:
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        token = self.client.cookies.get(AUTH_COOKIE_NAME)
+        self.assertIsNotNone(token)
+
+        with TestClient(app, base_url="https://testserver") as new_client:
+            new_client.cookies.set(AUTH_COOKIE_NAME, token)
+            detail_resp = new_client.get(f"/api/v1/trips/{created['id']}")
+            self.assertEqual(detail_resp.status_code, 200)
+            detail = detail_resp.json()
+            self.assertEqual(detail["id"], created["id"])
+            self.assertEqual(detail["created_at"], created["created_at"])
+            self.assertEqual(detail["destination"], created["destination"])
+            self.assertEqual(detail["ai_recommendation"], created["ai_recommendation"])
+            self.assertNotIn("user_id", detail)
+
+            list_resp = new_client.get("/api/v1/trips")
+            self.assertEqual(list_resp.status_code, 200)
+            self.assertEqual(list_resp.json()["total"], 1)
+
+    def test_legacy_backfill_and_migration_lifecycle(self) -> None:
+        db = SessionLocal()
+        try:
+            # Get current user ID
+            user = db.query(User).filter(User.username == "default_user").first()
+
+            # Temporarily drop NOT NULL constraint for the test scenario
+            db.execute(text("ALTER TABLE trips ALTER COLUMN user_id DROP NOT NULL;"))
+            db.commit()
+
+            # Insert a legacy unowned trip with user_id = NULL
+            db.execute(text("""
+                INSERT INTO trips (
+                    destination, country, days, budget, currency, travel_month,
+                    daily_budget, travel_season, category, recommended_places,
+                    recommended_transportation, ai_recommendation, created_at, user_id
+                ) VALUES (
+                    'Legacy Bali', 'Indonesia', 4, 1000, 'USD', 'June',
+                    250, 'Holiday Season', 'Standard', '["Ubud", "Kuta"]',
+                    'Train', '## Legacy AI Snapshot', NOW(), NULL
+                );
+            """))
+            db.commit()
+
+            # 1. Verify unowned stats
+            stats = verify_trips_ownership(db)
+            self.assertGreaterEqual(stats["unowned"], 1)
+
+            # 2. Enforcing NOT NULL fails when unowned > 0
+            with self.assertRaises(RuntimeError):
+                enforce_trips_user_id_non_null(db)
+
+            # 3. Backfill fails with non-existent target user
+            with self.assertRaises(ValueError):
+                backfill_legacy_trips(db, target_user_id=999999)
+
+            # 4. Backfill succeeds with valid target user
+            backfilled_count = backfill_legacy_trips(db, target_user_id=user.id)
+            self.assertGreaterEqual(backfilled_count, 1)
+
+            # 5. Verify stats show zero unowned
+            post_stats = verify_trips_ownership(db)
+            self.assertEqual(post_stats["unowned"], 0)
+
+            # 6. Enforce NOT NULL succeeds
+            enforce_trips_user_id_non_null(db)
+
+            # 7. Verify legacy trip retains all snapshot fields and AI narrative
+            legacy_row = db.query(Trip).filter(Trip.destination == "Legacy Bali").first()
+            self.assertIsNotNone(legacy_row)
+            self.assertEqual(legacy_row.user_id, user.id)
+            self.assertEqual(legacy_row.category, "Standard")
+            self.assertEqual(legacy_row.ai_recommendation, "## Legacy AI Snapshot")
+        finally:
+            try:
+                db.execute(text("ALTER TABLE trips ALTER COLUMN user_id SET NOT NULL;"))
+                db.commit()
+            except Exception:
+                pass
+            db.close()
+
+    def test_schema_migration_and_rollback_idempotency(self) -> None:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == "default_user").first()
+
+            # 1. Roll back user_id column completely to simulate legacy DB
+            rollback_trips_user_id_migration(db)
+
+            # 2. Insert legacy 13-column trip row without user_id
+            db.execute(text("""
+                INSERT INTO trips (
+                    destination, country, days, budget, currency, travel_month,
+                    daily_budget, travel_season, category, recommended_places,
+                    recommended_transportation, ai_recommendation, created_at
+                ) VALUES (
+                    'Legacy Bandung', 'Indonesia', 3, 500, 'USD', 'December',
+                    166.67, 'Peak Season', 'Backpacker', '["Tangkuban Perahu"]',
+                    'Bus', '## Legacy Bandung Plan', NOW()
+                );
+            """))
+            db.commit()
+
+            # 3. Run migrate_trips_schema twice to verify idempotency
+            migrate_trips_schema(db)
+            migrate_trips_schema(db)
+
+            # 4. Verify unowned stats
+            stats = verify_trips_ownership(db)
+            self.assertEqual(stats["unowned"], 1)
+
+            # 5. Backfill and enforce constraint
+            backfilled = backfill_legacy_trips(db, target_user_id=user.id)
+            self.assertEqual(backfilled, 1)
+            enforce_trips_user_id_non_null(db)
+
+            # 6. Verify backfilled trip row
+            row = db.query(Trip).filter(Trip.destination == "Legacy Bandung").first()
+            self.assertIsNotNone(row)
+            self.assertEqual(row.user_id, user.id)
+            self.assertEqual(row.category, "Backpacker")
+        finally:
+            try:
+                migrate_trips_schema(db)
+                enforce_trips_user_id_non_null(db)
+            except Exception:
+                pass
+            db.close()
+
+    def test_session_revocation_and_expiration_rejection(self) -> None:
+        import hashlib
+        created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
+        token = self.client.cookies.get(AUTH_COOKIE_NAME)
+
+        # 1. Revoke session explicitly in DB
+        db = SessionLocal()
+        try:
+            digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+            db.execute(text("UPDATE sessions SET revoked_at = NOW() WHERE token_digest = :digest"), {"digest": digest})
+            db.commit()
+        finally:
+            db.close()
+
+        # All trip endpoints reject revoked session with 401
+        self.assertEqual(self.client.get("/api/v1/trips").status_code, 401)
+        self.assertEqual(self.client.post("/api/v1/trips", json=self.valid_request()).status_code, 401)
+        self.assertEqual(self.client.get(f"/api/v1/trips/{created['id']}").status_code, 401)
+        self.assertEqual(self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 500}).status_code, 401)
+        self.assertEqual(self.client.delete(f"/api/v1/trips/{created['id']}").status_code, 401)
+
+        # 2. Re-login and expire session
+        self.client.post("/api/v1/auth/login", json={"username": "default_user", "password": "password123"})
+        token2 = self.client.cookies.get(AUTH_COOKIE_NAME)
+        db = SessionLocal()
+        try:
+            digest2 = hashlib.sha256(token2.encode("ascii")).hexdigest()
+            db.execute(text("UPDATE sessions SET expires_at = NOW() - INTERVAL '1 day' WHERE token_digest = :digest"), {"digest": digest2})
+            db.commit()
+        finally:
+            db.close()
+
+        # All trip endpoints reject expired session with 401
+        self.assertEqual(self.client.get("/api/v1/trips").status_code, 401)
+        self.assertEqual(self.client.post("/api/v1/trips", json=self.valid_request()).status_code, 401)
+        self.assertEqual(self.client.get(f"/api/v1/trips/{created['id']}").status_code, 401)
+        self.assertEqual(self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 500}).status_code, 401)
+        self.assertEqual(self.client.delete(f"/api/v1/trips/{created['id']}").status_code, 401)
+
+    def test_database_cleanup_leaves_no_records_behind(self) -> None:
+        self.client.post("/api/v1/trips", json=self.valid_request())
+        self._truncate_all()
+        db = SessionLocal()
+        try:
+            self.assertEqual(db.query(Trip).count(), 0)
+            self.assertEqual(db.query(User).count(), 0)
+            self.assertEqual(db.query(AuthSession).count(), 0)
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":
