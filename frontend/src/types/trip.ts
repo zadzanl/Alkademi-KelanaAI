@@ -31,6 +31,13 @@ export type TripResponse = {
   ai_recommendation: string | null;
 };
 
+export type TripListResponse = {
+  items: TripResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
 export type ActionState =
   | { ok: true; trip: TripResponse; submitted: FormValues }
   | {

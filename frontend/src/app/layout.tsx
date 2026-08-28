@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Instrument_Serif, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
+import { AuthHeader } from "../components/AuthHeader";
 
 const instrumentSerif = Instrument_Serif({
   weight: "400",
@@ -38,6 +39,7 @@ export default function RootLayout({
       <body
         className={`${instrumentSerif.variable} ${sourceSans.variable} antialiased`}
       >
+        <div className="border-b border-rule bg-paper px-5 py-2 text-right sm:px-8"><AuthHeader /></div>
         {children}
       </body>
     </html>

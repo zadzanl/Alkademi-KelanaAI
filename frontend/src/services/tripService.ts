@@ -1,5 +1,9 @@
 import { parse422, parseTripId } from "../lib/safety.ts";
-import type { TripRequest, TripResponse } from "../types/trip.ts";
+import type {
+  TripListResponse,
+  TripRequest,
+  TripResponse,
+} from "../types/trip.ts";
 
 const DB_READ_TIMEOUT_MS = 8_000;
 const AI_GENERATION_TIMEOUT_MS = 120_000;
@@ -196,33 +200,62 @@ function isTripResponse(data: unknown): data is TripResponse {
 }
 
 /**
- * Fetch all persisted trip records from the PostgreSQL database in deterministic ascending order.
- * Throws a TripApiError on 5xx/network failure so Next.js error.tsx can present a retry interface.
+ * These bounds mirror `backend/main.py` list_trips Query constraints. Keep both
+ * sides in sync if page validation changes: page >= 1 and page_size 1..100.
  */
-export async function getTrips(): Promise<TripResponse[]> {
-  const baseUrl = getApiBaseUrl();
-  try {
-    const response = await fetch(`${baseUrl}/api/v1/trips`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(DB_READ_TIMEOUT_MS),
-    });
+function isTripListResponse(data: unknown): data is TripListResponse {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+  const list = data as Record<string, unknown>;
+  return (
+    Array.isArray(list.items) &&
+    list.items.every(isTripResponse) &&
+    Number.isInteger(list.total) &&
+    (list.total as number) >= 0 &&
+    Number.isInteger(list.page) &&
+    (list.page as number) >= 1 &&
+    Number.isInteger(list.page_size) &&
+    (list.page_size as number) >= 1 &&
+    (list.page_size as number) <= 100
+  );
+}
 
-    const data = await handleResponsePayload<TripResponse[]>(response);
-    if (!Array.isArray(data)) {
+/**
+ * Fetch one newest-first page of persisted trip records from PostgreSQL.
+ * Callers pass a positive integer page and pageSize in 1..100. Values are sent
+ * unchanged because FastAPI is the authoritative request validator and returns
+ * a classified 422 validation error for invalid values.
+ * Throws `TripApiError("malformed")` when the envelope or any item drifts from
+ * the response contract, and TripApiError on 5xx/network failure so Next.js
+ * error.tsx can present a retry interface.
+ */
+export async function getTrips(
+  page = 1,
+  pageSize = 10,
+): Promise<TripListResponse> {
+  const baseUrl = getApiBaseUrl();
+  const query = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/v1/trips?${query}`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(DB_READ_TIMEOUT_MS),
+      },
+    );
+
+    const data = await handleResponsePayload<TripListResponse>(response);
+    if (!isTripListResponse(data)) {
       throw new TripApiError(
         "malformed",
         "The trip service returned an invalid list structure.",
       );
-    }
-    for (const item of data) {
-      if (!isTripResponse(item)) {
-        throw new TripApiError(
-          "malformed",
-          "The trip service returned an invalid trip structure.",
-        );
-      }
     }
     return data;
   } catch (error) {

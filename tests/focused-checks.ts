@@ -10,6 +10,7 @@ import { categoryStyle } from "../frontend/src/lib/categoryStyle.ts";
 import { markdownComponents } from "../frontend/src/lib/markdownPolicy.ts";
 import { invalidateTripsCache } from "../frontend/src/lib/tripCache.ts";
 import { months } from "../frontend/src/types/trip.ts";
+import { parseAuthMode, parsePublicUser, upstreamSessionCookie, upstreamSessionMaxAge } from "../frontend/src/services/authService.ts";
 
 const values = {
 	destination: "Kyoto",
@@ -64,6 +65,44 @@ test("maps a successful FastAPI response", async () => {
 	if (result.ok) {
 		assert.equal(result.trip.id, 7);
 	}
+});
+
+test("auth cookie bridge keeps only the upstream cookie pair and public identity", () => {
+
+	const upstream = new Response(JSON.stringify({ id: 1, username: "ada", created_at: "2026-01-01" }), {
+		status: 200,
+		headers: { "set-cookie": "kelana_session=opaque-token; HttpOnly; SameSite=Lax; Path=/" },
+	});
+	assert.equal(upstreamSessionCookie(upstream), "kelana_session=opaque-token");
+	assert.equal(upstreamSessionCookie(new Response(null, { headers: { "set-cookie": "unrelated=x; Path=/" } })), null);
+	assert.equal(upstreamSessionCookie(new Response(null, { headers: { "set-cookie": "kelana_session=; Path=/" } })), null);
+	assert.deepEqual(parsePublicUser({ id: 1, username: "ada", created_at: "2026-01-01", password_hash: "secret" }), {
+		id: 1,
+		username: "ada",
+		created_at: "2026-01-01",
+	});
+	assert.equal(parsePublicUser({ id: 1, username: "ada" }), null);
+});
+
+test("auth mode accepts only fixed login and registration routes", () => {
+	assert.equal(parseAuthMode("login"), "login");
+	assert.equal(parseAuthMode("register"), "register");
+	assert.equal(parseAuthMode("/api/v1/auth/register"), null);
+	assert.equal(parseAuthMode("logout"), null);
+	assert.equal(parseAuthMode(null), null);
+});
+
+test("auth cookie lifetime comes from the matched session cookie", () => {
+	const headers = new Headers();
+	headers.append("set-cookie", "unrelated=value; Max-Age=10; Path=/");
+	headers.append("set-cookie", "kelana_session=opaque-token; Max-Age=86400; HttpOnly; Path=/");
+	const upstream = new Response(null, {
+		headers,
+	});
+	assert.equal(upstreamSessionMaxAge(upstream), 86400);
+	assert.equal(upstreamSessionMaxAge(new Response(null, { headers: { "set-cookie": "kelana_session=opaque-token; Path=/" } })), undefined);
+	assert.ok((upstreamSessionMaxAge(new Response(null, { headers: { "set-cookie": "kelana_session=opaque-token; Max-Age=-1; Path=/" } })))! < 0);
+	assert.ok((upstreamSessionMaxAge(new Response(null, { headers: { "set-cookie": "kelana_session=opaque-token; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/" } })))! < 0);
 });
 
 test("rejects invalid input locally without fetching", async () => {
@@ -215,11 +254,37 @@ test("tripService getTrips and getTrip fetch and parse responses", async () => {
 	process.env.API_URL = "http://api.test";
 
 	// getTrips success
-	globalThis.fetch = async () => response([validTrip]);
-	const trips = await getTrips();
-	assert.equal(Array.isArray(trips), true);
-	assert.equal(trips.length, 1);
-	assert.equal(trips[0].id, 7);
+	let requestedUrl = "";
+	let requestedInit: RequestInit | undefined;
+	let requestedTimeout: number | undefined;
+	const originalTimeout = AbortSignal.timeout;
+	AbortSignal.timeout = ((milliseconds: number) => {
+		requestedTimeout = milliseconds;
+		return originalTimeout(milliseconds);
+	}) as typeof AbortSignal.timeout;
+	globalThis.fetch = async (input, init) => {
+		requestedUrl = String(input);
+		requestedInit = init;
+		return response({ items: [validTrip], total: 6, page: 2, page_size: 5 });
+	};
+	const trips = await getTrips(2, 5);
+	AbortSignal.timeout = originalTimeout;
+	assert.equal(requestedUrl, "http://api.test/api/v1/trips?page=2&page_size=5");
+	assert.equal(requestedInit?.cache, "no-store");
+	assert.equal(requestedTimeout, 8_000);
+	assert.equal(trips.items.length, 1);
+	assert.equal(trips.items[0].id, 7);
+	assert.equal(trips.total, 6);
+	assert.equal(trips.page, 2);
+	assert.equal(trips.page_size, 5);
+
+	// Defaults are forwarded exactly; FastAPI remains the authoritative range validator.
+	globalThis.fetch = async (input) => {
+		requestedUrl = String(input);
+		return response({ items: [], total: 0, page: 1, page_size: 10 });
+	};
+	await getTrips();
+	assert.equal(requestedUrl, "http://api.test/api/v1/trips?page=1&page_size=10");
 
 	// getTrip success
 	globalThis.fetch = async () => response(validTrip);
@@ -335,15 +400,55 @@ test("getTrip throws malformed on contract drift (full-shape guard)", async () =
 	assert.equal(trip?.ai_recommendation, null);
 });
 
-test("getTrips throws malformed when any array element fails full-shape guard", async () => {
+test("getTrips throws malformed on invalid envelopes and items", async () => {
 	process.env.API_URL = "http://api.test";
 
-	// One valid trip + one malformed trip
-	globalThis.fetch = async () => response([validTrip, { id: 99 }]);
+	// Missing envelope metadata
+	globalThis.fetch = async () => response({ items: [validTrip] });
 	await assert.rejects(
 		async () => getTrips(),
 		(err: unknown) => err instanceof TripApiError && err.kind === "malformed",
 	);
+
+	// One valid trip + one malformed trip
+	globalThis.fetch = async () => response({
+		items: [validTrip, { id: 99 }],
+		total: 2,
+		page: 1,
+		page_size: 10,
+	});
+	await assert.rejects(
+		async () => getTrips(),
+		(err: unknown) => err instanceof TripApiError && err.kind === "malformed",
+	);
+});
+
+test("getTrips forwards invalid numbers for authoritative FastAPI validation", async () => {
+	process.env.API_URL = "http://api.test";
+	const cases = [
+		{ page: 0, pageSize: 10 },
+		{ page: 1, pageSize: 101 },
+		{ page: 1.5, pageSize: 10 },
+		{ page: Number.NaN, pageSize: 10 },
+		{ page: Number.POSITIVE_INFINITY, pageSize: 10 },
+		{ page: 1e21, pageSize: 10 },
+	];
+
+	for (const { page, pageSize } of cases) {
+		let requestedUrl = "";
+		globalThis.fetch = async (input) => {
+			requestedUrl = String(input);
+			return response({ detail: [] }, 422);
+		};
+
+		await assert.rejects(
+			async () => getTrips(page, pageSize),
+			(err: unknown) => err instanceof TripApiError && err.kind === "validation",
+		);
+		const parsed = new URL(requestedUrl);
+		assert.equal(parsed.searchParams.get("page"), String(page));
+		assert.equal(parsed.searchParams.get("page_size"), String(pageSize));
+	}
 });
 
 test("streaming body cap rejects oversized response without content-length", async () => {

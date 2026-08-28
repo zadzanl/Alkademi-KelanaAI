@@ -3,6 +3,8 @@ import Link from "next/link";
 import { getTrips } from "../../services/tripService.ts";
 import { TripCard } from "../../components/TripCard.tsx";
 import { EmptyState } from "../../components/EmptyState.tsx";
+import { Pagination } from "../../components/Pagination.tsx";
+import { parseTripId } from "../../lib/safety.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +14,15 @@ export const metadata: Metadata = {
     "Browse and review all previously created travel plans and AI itineraries.",
 };
 
-export default async function TripsPage() {
-  const trips = await getTrips();
+type TripsPageProps = {
+  searchParams: Promise<{ page?: string }>;
+};
+
+export default async function TripsPage({ searchParams }: TripsPageProps) {
+  const { page: rawPage } = await searchParams;
+  const page = parseTripId(rawPage ?? "1") ?? 1;
+  const { items, total, page_size: pageSize } = await getTrips(page);
+  const isOutOfRange = page > 1 && items.length === 0 && total > 0;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -41,8 +50,7 @@ export default async function TripsPage() {
               Trip History
             </h1>
             <span className="rounded-full border border-rule bg-paper-light px-3 py-1 text-xs font-semibold tabular text-muted-ink">
-              {trips.length}{" "}
-              {trips.length === 1 ? "saved itinerary" : "saved itineraries"}
+              {total} {total === 1 ? "saved itinerary" : "saved itineraries"}
             </span>
           </div>
           <p className="mt-3 max-w-[60ch] text-base leading-relaxed text-muted-ink sm:text-lg">
@@ -53,14 +61,25 @@ export default async function TripsPage() {
 
         {/* Content Section */}
         <section aria-label="Saved Itineraries">
-          {trips.length === 0 ? (
+          {total === 0 ? (
             <EmptyState headingLevel="h2" />
+          ) : isOutOfRange ? (
+            <EmptyState
+              headingLevel="h2"
+              title="That page is empty"
+              description="There are saved itineraries, but none on this page. Return to the beginning of your trip history."
+              actionText="Back to page 1"
+              actionHref="/trips"
+            />
           ) : (
-            <div className="space-y-4">
-              {trips.map((trip) => (
-                <TripCard key={trip.id} trip={trip} />
-              ))}
-            </div>
+            <>
+              <div className="space-y-4">
+                {items.map((trip) => (
+                  <TripCard key={trip.id} trip={trip} />
+                ))}
+              </div>
+              <Pagination page={page} total={total} pageSize={pageSize} />
+            </>
           )}
         </section>
       </main>
