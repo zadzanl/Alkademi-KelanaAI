@@ -36,6 +36,7 @@ kelana-ai/
 - `psycopg[binary]` 3.3.4
 - python-dotenv 1.2.3
 - boto3 1.43.4 (Amazon Bedrock fallback provider)
+- argon2-cffi 25.1.0 (Argon2id password hashing)
 
 ## Setup
 
@@ -59,7 +60,7 @@ If your target PostgreSQL reports `permission denied for schema public` on first
 GRANT USAGE, CREATE ON SCHEMA public TO kelana_app;
 ```
 
-**Check**: connecting with the new role, e.g. `psql -U kelana_app -d kelanaai -c "select 1;"`, returns `1`.
+Check: connecting with the new role, e.g. `psql -U kelana_app -d kelanaai -c "select 1;"`, returns `1`.
 
 ### 2. Create the local environment
 
@@ -76,9 +77,16 @@ The `.env` file is gitignor-ed.
 
 ```text
 DATABASE_URL=postgresql+psycopg://<user>:<password>@127.0.0.1:5432/kelanaai
+ENVIRONMENT=development
+AUTH_SESSION_COOKIE=kelana_session
+AUTH_SESSION_TTL_SECONDS=604800
 ```
 
 A `DATABASE_URL` env variable is required. The application will not start without a value (`RuntimeError`).
+
+Sessions expire after seven days by default; set a different positive `AUTH_SESSION_TTL_SECONDS` for local testing. Set `ENVIRONMENT=production` to mark the session cookie Secure.
+
+Auth intentionally collects only a normalized username and password hash, stores only session-token digests, and is nowhere near full GDPR compliance.
 
 To enable AI recommendations, add the provider variables you want to use. The app selects a provider at configuration time in this order:
 
@@ -98,9 +106,7 @@ MODEL_ID=amazon.nova-lite-v1:0
 # AWS_BEARER_TOKEN_BEDROCK). They are NOT passed as aws_session_token.
 ```
 
-Empty values count as absent. If neither provider is completely configured, trip creation still succeeds and `ai_recommendation` is `null` (graceful degradation). If OpenRouter is selected but fails at runtime, the app does **not** fall back to Bedrock for that trip — selection is configuration-time only.
-
-> ⚠️ `.env` must not contain the typo `AWS_REGION=ap-shoutheast-2`. The correct region value is `ap-southeast-2`; the Bedrock key is region-scoped.
+If neither provider is completely configured, trip creation still succeeds and `ai_recommendation` is `null` (graceful degradation).
 
 ### 3a. Migrate the `trips` table (one-time, existing databases only)
 
@@ -147,23 +153,9 @@ npm run lint
 npm run build
 ```
 
-The implemented interface uses Instrument Serif for display text and Source Sans 3 for body/interface text. Non-null AI recommendations are rendered as provider-agnostic Markdown with raw HTML disabled and link/image URL schemes filtered. The current bundled Borobudur hero is local; the approved seven-addition static landmark index remains pending its per-file provenance and derivative gates.
+The implemented interface uses Instrument Serif for display text and Source Sans 3 for body/interface text. Non-null AI recommendations are rendered as provider-agnostic Markdown with raw HTML disabled and link/image URL schemes filtered. The current bundled Borobudur hero image is local; the approved seven-addition static landmark index remains pending its per-file provenance and derivative gates.
 
 `.agents/skills/impeccable/` and root `skills-lock.json` are intentionally local-only ignored tooling. This diverges from upstream tracking guidance so machine-specific agent skills and lock state are not product source; verify with `git check-ignore -v .agents/skills/impeccable/SKILL.md`.
-
-### Local planning authority for the active frontend revision
-
-This workspace deliberately ignores `openspec/` and `AGENTS.md`; they are local planning state and are not distributed by a normal clone or shown in a PR diff. The active canonical contract is `openspec/changes/add-nextjs-frontend/artifacts/design-revision-final-plan.md`. Its reconciled normative files are `proposal.md`, `design.md`, `tasks.md`, and `specs/trip-ui/spec.md` under that change, with Phase 0 evidence in `artifacts/implementation-003-doc-reconciliation.md`. A contributor working from a fresh clone must obtain or recreate that local planning state before continuing the revision rather than inferring the contract from source alone.
-
-From the repository root, verify the local contract and tracked diff with:
-
-```powershell
-openspec validate add-nextjs-frontend --type change --strict --no-interactive
-git diff --check
-git diff --exit-code -- backend
-```
-
-Before deployment, add authentication/authorization and rate limiting. The current unauthenticated Server Action/API path is suitable for local integration only and is not a deployment abuse boundary.
 
 ## API Examples
 
@@ -199,17 +191,17 @@ curl -X POST http://127.0.0.1:8000/api/v1/trips -H "Content-Type: application/js
 
 `ai_recommendation` can be NULL. When a provider is configured and returns text, it holds a Markdown narrative; when no provider is configured or the provider fails, it is `null`.
 
-### List saved trips (ascending ID)
+### List saved trips (newest first, paginated)
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/trips
 ```
 
 ```json
-[
-  {"id":1,...}
-]
+{"items":[{"id":1,...}],"total":1,"page":1,"page_size":10}
 ```
+
+The optional `page` and `page_size` query parameters default to `1` and `10`; `page_size` is capped at `100`. Items are ordered by descending ID, and pages beyond the available results return an empty `items` array with the correct `total`.
 
 ### Retrieve one saved trip
 

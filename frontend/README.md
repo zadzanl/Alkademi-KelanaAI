@@ -23,6 +23,11 @@ npm run dev
 
 Open <http://localhost:3000>. `API_URL` is server-only; do not rename it to `NEXT_PUBLIC_API_URL` or place credentials in it.
 
+Use `/auth` to register or sign in. Next.js server actions explicitly copy the
+FastAPI `Set-Cookie` session pair into an HttpOnly, SameSite=Lax cookie and
+forward it on later server-side auth requests; the raw token never enters
+action state or rendered markup. This phase does not make trips private.
+
 If FastAPI stops, restart `uvicorn backend.main:app --reload`, recheck `/health`, and press **Try again**. Submitted values remain available.
 
 ## Verification
@@ -36,6 +41,7 @@ npm run build
 ## Current interface contract
 
 - Six controlled request fields are submitted through the Next.js Server Action; successful results preserve the backend's fourteen response fields.
+- `/trips` reads the paginated list envelope (`items`, `total`, `page`, `page_size`), shows newest-first results in pages of 10 by default, and keeps the page number in `?page=N`; the API caps `page_size` at 100.
 - `TRIP_REQUEST_TIMEOUT_MS = 120_000` is the inner server-side FastAPI fetch timeout. Its 120,000 ms ceiling is separate from the backend/provider's approximately 15-second ceiling.
 - Non-null AI recommendations render as one provider-agnostic Markdown document. Raw HTML stays disabled and link/image URL schemes are filtered.
 - Instrument Serif is the display face and Source Sans 3 is the body/interface face. The visual system uses warm paper, tinted ink, terracotta, muted indigo, and restrained rules.
