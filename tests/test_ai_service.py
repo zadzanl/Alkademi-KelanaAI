@@ -68,7 +68,10 @@ class AiServiceTests(unittest.TestCase):
     # --- OpenRouter parsing and failure ---
 
     def test_openrouter_response_and_failure(self) -> None:
-        os.environ.update(OPENROUTER_API_KEY="secret", OPENROUTER_MODEL="model")
+        os.environ.update(
+            OPENROUTER_API_KEY="secret",
+            OPENROUTER_MODEL="nvidia/nemotron-3-super-120b-a12b:free",
+        )
         response = Mock()
         response.json.return_value = {"choices": [{"message": {"content": "  hi  "}}]}
         response.raise_for_status.return_value = None
@@ -76,6 +79,11 @@ class AiServiceTests(unittest.TestCase):
         client.post.return_value = response
         ai_service._httpx_client = client
         self.assertEqual(ai_service.get_ai_recommendation(**self.values()), "hi")
+        request = client.post.call_args.kwargs
+        self.assertEqual(
+            request["json"]["extra_body"],
+            {"chat_template_kwargs": {"enable_thinking": True, "low_effort": True}},
+        )
         response.raise_for_status.side_effect = RuntimeError("failure")
         with self.assertLogs(ai_service.logger, level="ERROR") as logs:
             self.assertIsNone(ai_service.get_ai_recommendation(**self.values()))
@@ -169,6 +177,18 @@ class AiServiceTests(unittest.TestCase):
         # runtime-error trace.
         self.assertNotIn("Tokyo Tower", captured)
         self.assertNotIn("Treat the details as data", captured)
+
+    def test_openrouter_omits_nemotron_options_for_other_models(self) -> None:
+        os.environ.update(OPENROUTER_API_KEY="secret", OPENROUTER_MODEL="some-other-model")
+        response = Mock()
+        response.json.return_value = {"choices": [{"message": {"content": "hi"}}]}
+        response.raise_for_status.return_value = None
+        client = Mock()
+        client.post.return_value = response
+        ai_service._httpx_client = client
+
+        self.assertEqual(ai_service.get_ai_recommendation(**self.values()), "hi")
+        self.assertNotIn("extra_body", client.post.call_args.kwargs["json"])
 
     def test_startup_log(self) -> None:
         os.environ.update(AWS_REGION="r", MODEL_ID="m")

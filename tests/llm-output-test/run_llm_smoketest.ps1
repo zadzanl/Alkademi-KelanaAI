@@ -29,6 +29,7 @@ function Invoke-AiSmoke {
     # before calling it, preventing a mislabeled fallback result.
     & $Python -c @"
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -76,6 +77,7 @@ budgets = (
 )
 
 sections = []
+durations = []
 total_chars = 0
 total_words = 0
 for destination in destinations:
@@ -86,6 +88,7 @@ for destination in destinations:
                 f'category setup error: {budget} produced {category}, expected {expected_category}'
             )
 
+        start_time = time.perf_counter()
         result = get_ai_recommendation(
             destination=destination['destination'],
             country=destination['country'],
@@ -98,9 +101,12 @@ for destination in destinations:
             recommended_transportation=get_recommended_transportation(category),
             travel_season=destination['travel_season'],
         )
+        elapsed = time.perf_counter() - start_time
+        durations.append(elapsed)
+
         if not isinstance(result, str) or not result.strip():
             raise SystemExit(
-                f'{provider} smoke failed: {destination["country"]} {category} returned no non-empty text'
+                f'{provider} smoke failed: {destination["country"]} {category} returned no non-empty text ({elapsed:.2f}s)'
             )
 
         result = result.strip()
@@ -108,13 +114,16 @@ for destination in destinations:
         total_words += len(result.split())
         sections.append(
             f'# {destination["country"]} — {category}\n\n'
-            f'<!-- budget_usd={budget:.2f} days={destination["days"]} -->\n\n'
+            f'<!-- budget_usd={budget:.2f} days={destination["days"]} duration_sec={elapsed:.2f} -->\n\n'
             f'{result}'
         )
         print(
             f'PASS {len(sections)}/6: {destination["country"]} {category} '
-            f'({len(result)} characters)'
+            f'({len(result)} characters, {elapsed:.2f}s)'
         )
+
+total_duration = sum(durations)
+avg_duration = total_duration / len(durations) if durations else 0.0
 
 output = (
     '<!--\nprovider=' + provider + '\nrequests=6\n'
@@ -122,10 +131,15 @@ output = (
     'len_chars=' + str(total_chars) +
     '\ntokens_est_words=' + str(round(total_words / 0.75)) +
     '\ntokens_est_chars4=' + str(total_chars // 4) +
+    f'\ntotal_duration_sec={total_duration:.2f}' +
+    f'\navg_duration_sec={avg_duration:.2f}' +
     '\n-->\n\n' + '\n\n---\n\n'.join(sections) + '\n'
 )
 Path(r'$OutputFile').write_text(output, encoding='utf-8')
-print(f'PASS: {provider} completed all 6 requests ({total_chars} total characters)')
+print(
+    f'PASS: {provider} completed all 6 requests '
+    f'({total_chars} total characters | total time: {total_duration:.2f}s | avg time: {avg_duration:.2f}s)'
+)
 print(r'Output: $OutputFile')
 "@
 

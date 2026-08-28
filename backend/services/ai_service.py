@@ -11,6 +11,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+NEMOTRON_MODEL = "nemotron-3-super-120b-a12b"
+GLM_MODEL = "glm-5.2"
+DEEPSEEK_MODEL = "deepseek-v4-flash-0731"
 DEFAULT_RESPONSE_LANGUAGE = "English"
 _httpx_client: httpx.Client | None = None
 _httpx_lock = threading.Lock()
@@ -86,6 +89,26 @@ Add temporal and economical margin for error. Keep the recommendation concise. W
 def _get_openrouter_recommendation(prompt: str) -> str | None:
     global _httpx_client
     try:
+        model = os.environ["OPENROUTER_MODEL"]
+        request_body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if NEMOTRON_MODEL in model:
+            request_body["extra_body"] = {
+                "chat_template_kwargs": {
+                    "enable_thinking": True,
+                    "low_effort": True,
+                }
+            }
+        elif GLM_MODEL in model:
+            request_body["reasoning"] = {
+                "effort": "high",
+            }
+        elif DEEPSEEK_MODEL in model:
+            request_body["reasoning"] = {
+                "effort": "low",
+            }
         if _httpx_client is None:
             with _httpx_lock:
                 if _httpx_client is None:
@@ -96,7 +119,7 @@ def _get_openrouter_recommendation(prompt: str) -> str | None:
                 "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
                 "X-OpenRouter-Title": "KelanaAI",
             },
-            json={"model": os.environ["OPENROUTER_MODEL"], "messages": [{"role": "user", "content": prompt}]},
+            json=request_body,
             timeout=15,
         )
         response.raise_for_status()

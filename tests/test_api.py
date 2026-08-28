@@ -223,11 +223,14 @@ class TripApiTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 422)
 
-    def test_empty_list_returns_empty_array(self) -> None:
+    def test_empty_list_returns_paginated_envelope(self) -> None:
         response = self.client.get("/api/v1/trips")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [])
+        self.assertEqual(
+            response.json(),
+            {"items": [], "total": 0, "page": 1, "page_size": 10},
+        )
 
     def test_post_detail_round_trip_preserves_id_and_timestamp(self) -> None:
         create_response = self.client.post(
@@ -247,7 +250,7 @@ class TripApiTests(unittest.TestCase):
         self.assertEqual(detail["destination"], created["destination"])
         self.assertEqual(detail["category"], created["category"])
 
-    def test_two_creates_are_listed_in_ascending_id_order(self) -> None:
+    def test_two_creates_are_listed_in_descending_id_order(self) -> None:
         first = self.client.post(
             "/api/v1/trips", json=self.valid_request()
         ).json()
@@ -262,7 +265,96 @@ class TripApiTests(unittest.TestCase):
 
         listing = self.client.get("/api/v1/trips").json()
         self.assertEqual(
-            [row["id"] for row in listing], [first["id"], second["id"]]
+            [row["id"] for row in listing["items"]],
+            [second["id"], first["id"]],
+        )
+        self.assertEqual(listing["total"], 2)
+
+    def test_default_page_returns_ten_newest_with_full_total(self) -> None:
+        created_ids = [
+            self.client.post(
+                "/api/v1/trips",
+                json=self.valid_request(destination=f"Trip {index}"),
+            ).json()["id"]
+            for index in range(11)
+        ]
+
+        response = self.client.get("/api/v1/trips")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["total"], 11)
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["page_size"], 10)
+        self.assertEqual(
+            [row["id"] for row in body["items"]],
+            list(reversed(created_ids))[:10],
+        )
+
+    def test_page_and_page_size_slice_newest_first(self) -> None:
+        created_ids = [
+            self.client.post(
+                "/api/v1/trips",
+                json=self.valid_request(destination=f"Trip {index}"),
+            ).json()["id"]
+            for index in range(7)
+        ]
+
+        response = self.client.get("/api/v1/trips?page=2&page_size=3")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["total"], 7)
+        self.assertEqual(body["page"], 2)
+        self.assertEqual(body["page_size"], 3)
+        self.assertEqual(
+            [row["id"] for row in body["items"]],
+            list(reversed(created_ids))[3:6],
+        )
+
+    def test_invalid_pagination_query_returns_422(self) -> None:
+        for query in (
+            "page=0",
+            "page=-1",
+            "page=abc",
+            "page_size=0",
+            "page_size=-1",
+            "page_size=101",
+            "page_size=abc",
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(f"/api/v1/trips?{query}")
+                self.assertEqual(response.status_code, 422)
+
+    def test_out_of_range_page_returns_empty_items_with_total(self) -> None:
+        created = self.client.post(
+            "/api/v1/trips", json=self.valid_request()
+        ).json()
+
+        response = self.client.get("/api/v1/trips?page=999")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"items": [], "total": 1, "page": 999, "page_size": 10},
+        )
+        self.assertGreater(created["id"], 0)
+
+    def test_huge_out_of_range_page_does_not_overflow_database(self) -> None:
+        self.client.post("/api/v1/trips", json=self.valid_request())
+        huge_page = 999999999999999999999
+
+        response = self.client.get(f"/api/v1/trips?page={huge_page}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "items": [],
+                "total": 1,
+                "page": huge_page,
+                "page_size": 10,
+            },
         )
 
     def test_unknown_detail_returns_404(self) -> None:
@@ -388,7 +480,9 @@ class TripApiTests(unittest.TestCase):
         self.client.delete(f"/api/v1/trips/{created['id']}")
 
         listing = self.client.get("/api/v1/trips").json()
-        self.assertNotIn(created["id"], [row["id"] for row in listing])
+        self.assertNotIn(
+            created["id"], [row["id"] for row in listing["items"]]
+        )
 
     def test_delete_unknown_id_returns_404(self) -> None:
         created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
