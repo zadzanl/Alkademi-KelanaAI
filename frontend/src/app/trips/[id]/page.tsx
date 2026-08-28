@@ -56,7 +56,7 @@ export default async function TripDetailPage({ params }: TripDetailPageProps) {
           headingLevel="h1"
           showBackLink={true}
           backHref="/trips"
-          backLabel="Back to Trip History"
+          backLabel="Back to My Trips"
         />
       </main>
     </div>

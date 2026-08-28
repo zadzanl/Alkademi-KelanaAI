@@ -42,7 +42,7 @@ export type ActionState =
   | { ok: true; trip: TripResponse; submitted: FormValues }
   | {
       ok: false;
-      kind: "validation" | "timeout" | "network" | "upstream" | "malformed";
+      kind: "validation" | "timeout" | "network" | "upstream" | "malformed" | "unauthorized";
       message: string;
       fieldErrors?: Partial<Record<keyof FormValues, string>>;
       submitted: FormValues;

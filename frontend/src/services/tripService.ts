@@ -14,7 +14,8 @@ export type TripErrorKind =
   | "timeout"
   | "network"
   | "upstream"
-  | "malformed";
+  | "malformed"
+  | "unauthorized";
 
 export class TripApiError extends Error {
   readonly kind: TripErrorKind;
@@ -32,6 +33,18 @@ export class TripApiError extends Error {
     this.kind = kind;
     this.status = status;
     this.fieldErrors = fieldErrors;
+  }
+}
+
+export async function getSessionCookieHeader(): Promise<string | null> {
+  try {
+    const { cookies } = await import("next/headers");
+    const cookieStore = await cookies();
+    const cookieName = process.env.AUTH_SESSION_COOKIE?.trim() || "kelana_session";
+    const session = cookieStore.get(cookieName);
+    return session ? `${cookieName}=${session.value}` : null;
+  } catch {
+    return null;
   }
 }
 
@@ -138,6 +151,13 @@ async function handleResponsePayload<T>(response: Response): Promise<T> {
     payload = JSON.parse(rawPayload || "null");
   } catch {
     if (!response.ok) {
+      if (response.status === 401) {
+        throw new TripApiError(
+          "unauthorized",
+          "Sign in required to view or manage your trips.",
+          401,
+        );
+      }
       throw new TripApiError(
         "upstream",
         "The trip service could not complete that request.",
@@ -148,6 +168,14 @@ async function handleResponsePayload<T>(response: Response): Promise<T> {
       "malformed",
       "The trip service returned an unexpected result.",
       response.status,
+    );
+  }
+
+  if (response.status === 401) {
+    throw new TripApiError(
+      "unauthorized",
+      "Sign in required to view or manage your trips.",
+      401,
     );
   }
 
@@ -239,12 +267,17 @@ export async function getTrips(
     page: String(page),
     page_size: String(pageSize),
   });
+  const cookieHeader = await getSessionCookieHeader();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (cookieHeader) {
+    headers["cookie"] = cookieHeader;
+  }
   try {
     const response = await fetch(
       `${baseUrl}/api/v1/trips?${query}`,
       {
         method: "GET",
-        headers: { Accept: "application/json" },
+        headers,
         cache: "no-store",
         signal: AbortSignal.timeout(DB_READ_TIMEOUT_MS),
       },
@@ -271,7 +304,7 @@ export async function getTrips(
  *
  * Contract:
  * - Returns `null` when the ID is syntactically invalid (fails `parseTripId`) or when the
- *   backend responds 404 (trip does not exist).
+ *   backend responds 404 (trip does not exist) or 401 (unauthorized / expired session).
  * - Returns the full `TripResponse` on success.
  * - Throws `TripApiError("malformed")` when the backend returns a 2xx body that does not
  *   conform to the 14-field `TripResponse` shape (contract drift).
@@ -284,15 +317,20 @@ export async function getTrip(id: number | string): Promise<TripResponse | null>
   }
 
   const baseUrl = getApiBaseUrl();
+  const cookieHeader = await getSessionCookieHeader();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (cookieHeader) {
+    headers["cookie"] = cookieHeader;
+  }
   try {
     const response = await fetch(`${baseUrl}/api/v1/trips/${numericId}`, {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers,
       cache: "no-store",
       signal: AbortSignal.timeout(DB_READ_TIMEOUT_MS),
     });
 
-    if (response.status === 404) {
+    if (response.status === 404 || response.status === 401) {
       return null;
     }
 
@@ -318,13 +356,18 @@ export async function getTrip(id: number | string): Promise<TripResponse | null>
  */
 export async function generateTrip(body: TripRequest): Promise<TripResponse> {
   const baseUrl = getApiBaseUrl();
+  const cookieHeader = await getSessionCookieHeader();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (cookieHeader) {
+    headers["cookie"] = cookieHeader;
+  }
   try {
     const response = await fetch(`${baseUrl}/api/v1/trips`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
       cache: "no-store",
       signal: AbortSignal.timeout(AI_GENERATION_TIMEOUT_MS),

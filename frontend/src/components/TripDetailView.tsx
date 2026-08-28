@@ -24,7 +24,7 @@ export interface TripDetailViewProps {
   backHref?: string;
   /**
    * Text label for the back link.
-   * @default "Back to Trip History"
+   * @default "Back to My Trips"
    */
   backLabel?: string;
   className?: string;
@@ -35,7 +35,7 @@ export function TripDetailView({
   headingLevel = "h2",
   showBackLink = false,
   backHref = "/trips",
-  backLabel = "Back to Trip History",
+  backLabel = "Back to My Trips",
   className = "",
 }: TripDetailViewProps) {
   const HeadingTag = headingLevel;

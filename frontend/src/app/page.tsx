@@ -320,7 +320,14 @@ export default function Home() {
                   role="alert"
                 >
                   <p className="font-bold">{state.message}</p>
-                  {state.kind !== "validation" && (
+                  {state.kind === "unauthorized" ? (
+                    <Link
+                      href="/auth"
+                      className="mt-3 inline-block min-h-12 font-bold underline underline-offset-4"
+                    >
+                      Sign in to KelanaAI
+                    </Link>
+                  ) : state.kind !== "validation" && (
                     <button
                       disabled={pending}
                       formAction={formAction}

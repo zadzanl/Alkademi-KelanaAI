@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import { createTrip } from "../frontend/src/app/actions.ts";
 import { localErrors, parse422, parseTripId, safeUrl } from "../frontend/src/app/safety.ts";
-import { getTrips, getTrip, TripApiError } from "../frontend/src/services/tripService.ts";
+import { getTrips, getTrip, generateTrip, TripApiError } from "../frontend/src/services/tripService.ts";
 import { categoryStyle } from "../frontend/src/lib/categoryStyle.ts";
 import { markdownComponents } from "../frontend/src/lib/markdownPolicy.ts";
 import { invalidateTripsCache } from "../frontend/src/lib/tripCache.ts";
@@ -531,3 +531,82 @@ test("trip cache invalidation calls the documented path and propagates runtime f
 		/request async storage failed in production/,
 	);
 });
+
+test("tripService maps 401 to unauthorized error kind in getTrips and generateTrip", async () => {
+	process.env.API_URL = "http://api.test";
+
+	// getTrips maps 401 to unauthorized
+	globalThis.fetch = async () => response({ detail: "Authentication required" }, 401);
+	await assert.rejects(
+		async () => getTrips(),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+
+	// generateTrip maps 401 to unauthorized
+	globalThis.fetch = async () => response({ detail: "Authentication required" }, 401);
+	await assert.rejects(
+		async () => generateTrip({ destination: "Japan", country: "Japan", days: 5, budget: 1500, currency: "USD", travel_month: "December" }),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+
+	// getTrip maps 401 to null (same as not found, hiding existence)
+	globalThis.fetch = async () => response({ detail: "Authentication required" }, 401);
+	const trip401 = await getTrip(123);
+	assert.equal(trip401, null);
+});
+
+test("createTrip action maps 401 to unauthorized and preserves submitted form values", async () => {
+	process.env.API_URL = "http://api.test";
+	globalThis.fetch = async () => response({ detail: "Authentication required" }, 401);
+
+	const result = await createTrip(null, form());
+
+	assert.equal(result.ok, false);
+	if (!result.ok) {
+		assert.equal(result.kind, "unauthorized");
+		assert.equal(result.message, "Please sign in to save your travel itinerary.");
+		assert.equal(result.submitted.destination, "Kyoto");
+		assert.equal(result.submitted.budget, "1500");
+	}
+});
+
+test("tripService forwards request headers and preserves 14-field responses", async () => {
+	process.env.API_URL = "http://api.test";
+	let capturedHeaders: HeadersInit | undefined;
+
+	globalThis.fetch = async (_input, init) => {
+		capturedHeaders = init?.headers;
+		return response(validTrip);
+	};
+
+	const created = await generateTrip({
+		destination: "Kyoto",
+		country: "Japan",
+		days: 5,
+		budget: 1500,
+		currency: "USD",
+		travel_month: "December",
+	});
+
+	assert.equal(created.id, 7);
+	assert.equal(created.category, "Standard");
+	assert.equal(Object.hasOwn(created, "user_id"), false);
+	assert.ok(capturedHeaders !== undefined);
+});
+
+test("tripService maps non-JSON 401 responses to unauthorized error kind", async () => {
+	process.env.API_URL = "http://api.test";
+
+	// HTML or plain-text 401 response from proxy
+	globalThis.fetch = async () =>
+		new Response("<html><body>401 Unauthorized</body></html>", {
+			status: 401,
+			headers: { "content-type": "text/html" },
+		});
+
+	await assert.rejects(
+		async () => getTrips(),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+});
+

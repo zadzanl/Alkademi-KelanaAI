@@ -131,6 +131,15 @@ export async function createTrip(
     return { ok: true, trip, submitted };
   } catch (error) {
     if (error instanceof TripApiError) {
+      if (error.kind === "unauthorized" || error.status === 401) {
+        return {
+          ok: false,
+          kind: "unauthorized",
+          message: "Please sign in to save your travel itinerary.",
+          submitted,
+        };
+      }
+
       return {
         ok: false,
         kind: error.kind,
