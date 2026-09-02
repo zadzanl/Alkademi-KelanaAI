@@ -5,7 +5,6 @@ import { localErrors } from "../lib/safety.ts";
 import { invalidateTripsCache } from "../lib/tripCache.ts";
 import type { ActionState, FormValues, TripRequest } from "./types.ts";
 import { authFetch, clearLocalSession, getCurrentUser, parseAuthMode, parsePublicUser, persistUpstreamSession, type AuthMode, type AuthResult } from "../services/authService.ts";
-
 export type AuthActionState = AuthResult & { submittedUsername?: string; authMode?: AuthMode };
 
 function authSubmitted(formData: FormData): string {

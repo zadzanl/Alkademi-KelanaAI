@@ -21,6 +21,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import os
 import re
+import json
+import logging
+import threading
+import time
 from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -43,7 +47,14 @@ from backend.services.auth_service import (
     session_for_token,
     verify_password,
 )
-from backend.services.ai_service import get_ai_recommendation, log_ai_provider_config
+from backend.services.ai_service import (
+    generate_rag_comparison,
+    get_ai_recommendation,
+    log_ai_provider_config,
+)
+
+_comparison_hits: dict[int, list[float]] = {}
+_comparison_lock = threading.Lock()
 from backend.services.trip_service import (
     calculate_daily_budget,
     get_recommended_places,
@@ -51,6 +62,7 @@ from backend.services.trip_service import (
     get_travel_season,
     get_trip_category,
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -313,10 +325,16 @@ def create_trip(
         recommended_places=get_recommended_places(category),
         recommended_transportation=get_recommended_transportation(category),
     )
+    generation_started = time.perf_counter()
     record.ai_recommendation = get_ai_recommendation(
-        destination=trip.destination, country=trip.country, days=trip.days,
-        budget=trip.budget, currency=trip.currency, travel_month=trip.travel_month,
-        category=category, recommended_places=record.recommended_places,
+        destination=trip.destination,
+        country=trip.country,
+        days=trip.days,
+        budget=trip.budget,
+        currency=trip.currency,
+        travel_month=trip.travel_month,
+        category=category,
+        recommended_places=record.recommended_places,
         recommended_transportation=record.recommended_transportation,
         travel_season=record.travel_season,
     )
@@ -325,7 +343,51 @@ def create_trip(
     # Refresh reloads database-issued values (notably `id` and `created_at`)
     # so they are part of the response before explicit conversion.
     db.refresh(record)
+    rag_logging_enabled = (
+        os.getenv("RAG_COMPARISON_LOGGING", "false").lower() == "true"
+        and os.getenv("RAG_ENABLED", "true").lower() == "true"
+    )
+    if rag_logging_enabled:
+        elapsed_ms = int((time.perf_counter() - generation_started) * 1000)
+        metrics = {
+            "event": "rag_inference",
+            "trip_id": record.id,
+            "provider": "openrouter" if os.getenv("OPENROUTER_MODEL") else "bedrock",
+            "rag_enabled": True,
+            "bedrock_ms": 0,
+            "exa_ms": 0,
+            "total_retrieval_ms": 0,
+            "generation_ms": elapsed_ms,
+            "total_ms": elapsed_ms,
+            "kb_chunks_count": 0,
+            "exa_highlights_count": 0,
+            "top_chunk_score": 0.0,
+            "top_exa_score": 0.0,
+            "sources": [],
+            "web_domains": [],
+            "bedrock_fallback": False,
+            "exa_fallback": False,
+        }
+        logging.getLogger("backend.services.ai_service").info(
+            "RAG_METRICS:%s", json.dumps(metrics, separators=(",", ":"))
+        )
     return TripResponse.model_validate(record)
+
+@app.post("/api/v1/knowledge/compare")
+def compare_knowledge(trip: TripRequest, user: User = Depends(current_user)) -> dict:
+    if os.getenv("RAG_COMPARISON_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=403, detail="RAG comparison endpoint is disabled in this environment.")
+    now = time.time()
+    with _comparison_lock:
+        recent = [stamp for stamp in _comparison_hits.get(user.id, []) if now - stamp < 60]
+        if len(recent) >= 5:
+            raise HTTPException(
+                status_code=429,
+                detail="RAG comparison rate limit exceeded.",
+            )
+        recent.append(now)
+        _comparison_hits[user.id] = recent
+    return generate_rag_comparison(trip)
 
 
 @app.get("/api/v1/trips", response_model=TripListResponse)
