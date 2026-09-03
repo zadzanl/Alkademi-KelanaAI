@@ -196,6 +196,31 @@ class AiServiceTests(unittest.TestCase):
             ai_service.log_ai_provider_config()
         self.assertIn("providers_configured: openrouter=no bedrock=yes", logs.output[0])
 
+    def test_exa_accepts_highlights_without_a_score(self) -> None:
+        os.environ.update(EXA_API_KEY="key", EXA_ENABLED="true")
+        response = Mock()
+        response.json.return_value = {
+            "results": [
+                {
+                    "title": "Bali guide",
+                    "url": "https://example.com/bali",
+                    "highlights": ["June is a dry-season travel month."],
+                }
+            ]
+        }
+        response.raise_for_status.return_value = None
+        client = Mock()
+        client.post.return_value = response
+        ai_service._exa_client = client
+
+        results = ai_service.retrieve_exa_search_highlights("Bali in June")
+
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0]["score"])
+        self.assertEqual(results[0]["highlights"][0], "June is a dry-season travel month.")
+        request = client.post.call_args.kwargs["json"]
+        self.assertEqual(request["contents"]["text"]["maxCharacters"], 2000)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -154,6 +154,15 @@ def _attr(value: Any, limit: int) -> str:
     return sanitize_rag_text(value or "", limit)
 
 
+def _prompt_text(value: Any, limit: int) -> str:
+    """Bound retrieved text and make application truncation visible to the LLM."""
+    text = sanitize_rag_text(value, limit)
+    if len(text) < len(str(value)):
+        marker = "<PROMPT_TRUNCATED>"
+        text = text[: max(0, limit - len(marker))].rstrip() + marker
+    return text
+
+
 def retrieve_knowledge_chunks(
     query: str,
     top_k: int | None = None,
@@ -171,13 +180,26 @@ def retrieve_knowledge_chunks(
             if score_threshold is not None
             else float(os.getenv("RAG_SCORE_THRESHOLD", "0.3"))
         )
-        response = _get_boto_client("bedrock-agent-runtime").retrieve(
-            knowledgeBaseId=kb_id,
-            retrievalQuery={"text": query},
-            retrievalConfiguration={
+        client = _get_boto_client("bedrock-agent-runtime")
+        request = {
+            "knowledgeBaseId": kb_id,
+            "retrievalQuery": {"text": query},
+            "retrievalConfiguration": {
                 "vectorSearchConfiguration": {"numberOfResults": count}
             },
-        )
+        }
+        try:
+            response = client.retrieve(**request)
+        except Exception as exc:
+            # Managed Knowledge Bases reject vectorSearchConfiguration. Retry
+            # only that provider-reported shape mismatch; preserve the legacy
+            # vector request for customer-managed Knowledge Bases.
+            if "managed knowledge bases" not in str(exc).lower():
+                raise
+            request["retrievalConfiguration"] = {
+                "managedSearchConfiguration": {"numberOfResults": count}
+            }
+            response = client.retrieve(**request)
         output = []
         for item in response.get("retrievalResults", []):
             try:
@@ -212,7 +234,7 @@ def retrieve_exa_search_highlights(
     if not api_key or os.getenv("EXA_ENABLED", "true").lower() != "true":
         return []
     try:
-        count = num_results or int(os.getenv("EXA_NUM_RESULTS", "10"))
+        count = num_results or int(os.getenv("EXA_NUM_RESULTS", "3"))
         threshold = (
             score_threshold
             if score_threshold is not None
@@ -227,6 +249,10 @@ def retrieve_exa_search_highlights(
                 "numResults": count,
                 "contents": {
                     "highlights": True,
+                    # Keep highlights as the primary grounding payload, but
+                    # request page text so providers that omit highlights still
+                    # have a bounded fallback excerpt available.
+                    "text": {"maxCharacters": 2000},
                     "extras": {"links": 1},
                 },
             },
@@ -234,20 +260,25 @@ def retrieve_exa_search_highlights(
         response.raise_for_status()
         output = []
         for item in (response.json() or {}).get("results", []):
+            raw_score = item.get("score")
             try:
-                score = float(item.get("score") or 0)
+                score = float(raw_score) if raw_score is not None else None
             except (TypeError, ValueError):
-                score = 0.0
+                score = None
             highlights = item.get("highlights") or (
                 [item.get("text", "")[:300]] if item.get("text") else []
             )
-            if score >= threshold and highlights:
+            # Exa may omit score entirely for otherwise valid results. Do not
+            # turn an unknown score into zero and discard the result; apply the
+            # threshold only when Exa supplied a numeric score.
+            if (score is None or score >= threshold) and highlights:
                 output.append(
                     {
                         "title": item.get("title", ""),
                         "url": item.get("url", ""),
                         "score": score,
                         "highlights": highlights[:2],
+                        "text": (item.get("text") or "")[:2000],
                         "published_date": item.get("publishedDate"),
                     }
                 )
@@ -284,22 +315,23 @@ def assemble_rag_context(
 ) -> str:
     kb = sorted(kb_chunks, key=lambda x: float(x.get("score") or 0), reverse=True)
     web = sorted(web_results, key=lambda x: float(x.get("score") or 0), reverse=True)
-    kb_cap = 1500 if kb and web else 3000
-    web_cap = 1500 if kb and web else 3000
+    context_cap = int(os.getenv("RAG_CONTEXT_MAX_CHARS", "32768"))
+    kb_cap = context_cap // 2 if kb and web else context_cap
+    web_cap = context_cap // 2 if kb and web else context_cap
+    chunk_cap = int(os.getenv("RAG_MAX_CHUNK_CHARS", "4096"))
+    highlight_cap = int(os.getenv("EXA_MAX_HIGHLIGHT_CHARS", "1000"))
     docs, results, used = [], [], 0
     for item in kb:
-        text = sanitize_rag_text(
+        text = _prompt_text(
             item.get("text", ""),
-            min(1000, int(os.getenv("RAG_MAX_CHUNK_CHARS", "1000"))),
+            chunk_cap,
         )
         if text and used + len(text) <= kb_cap:
             docs.append((item, text))
             used += len(text)
     used = 0
     for item in web:
-        highlights = [
-            sanitize_rag_text(x, 300) for x in (item.get("highlights") or [])[:2]
-        ]
+        highlights = [_prompt_text(x, highlight_cap) for x in (item.get("highlights") or [])[:2]]
         highlights = [x for x in highlights if x]
         if highlights and used + sum(map(len, highlights)) <= web_cap:
             results.append((item, highlights))
@@ -319,7 +351,7 @@ def assemble_rag_context(
         return f'<retrieved_context><verified_knowledge_base count="{len(docs)}">{d}</verified_knowledge_base><live_web_search_results count="{len(results)}">{w}</live_web_search_results></retrieved_context>'
 
     xml = render()
-    while len(xml) > 4000 and (docs or results):
+    while len(xml) > context_cap and (docs or results):
         if results:
             results.pop()
         else:
