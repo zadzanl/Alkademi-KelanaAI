@@ -1,7 +1,11 @@
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { categoryStyle } from "../lib/categoryStyle.ts";
-import { markdownComponents } from "../lib/markdownPolicy.ts";
+import {
+  markdownComponents,
+  markdownPlugins,
+  normalizeMarkdownTables,
+} from "../lib/markdownPolicy.ts";
 import type { TripResponse } from "../types/trip.ts";
 
 export interface TripDetailViewProps {
@@ -177,38 +181,11 @@ export function TripDetailView({
         </div>
       </section>
 
-      {/* 4. Places & AI Narrative Columns */}
-      <div className="grid gap-12 py-12 lg:grid-cols-[0.65fr_1.35fr] lg:gap-20">
-        {/* Recommended Places */}
-        <section aria-labelledby="places-heading" className="min-w-0">
-          <SubHeadingTag
-            id="places-heading"
-            className="font-display text-3xl leading-none text-ink"
-          >
-            Places to keep close
-          </SubHeadingTag>
-          <ol className="mt-7 border-t border-rule">
-            {(trip.recommended_places ?? []).map((place, index) => (
-              <li
-                key={`${place}-${index}`}
-                className="wrap-anywhere grid grid-cols-[2rem_1fr] gap-3 border-b border-rule py-4 text-ink"
-              >
-                <span
-                  className="tabular text-sm font-bold text-terracotta-dark"
-                  aria-hidden="true"
-                >
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="font-semibold">{place}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        {/* AI Itinerary Narrative */}
+      {/* 4. AI Itinerary Narrative */}
+      <div className="py-12">
         <section
           aria-labelledby="itinerary-heading"
-          className="min-w-0 border-t border-ink pt-5 lg:border-t-0 lg:pt-0"
+          className="min-w-0 border-t border-ink pt-5"
         >
           <SubHeadingTag
             id="itinerary-heading"
@@ -218,22 +195,23 @@ export function TripDetailView({
           </SubHeadingTag>
 
           {trip.ai_recommendation?.trim() ? (
-            <div className="journal-prose prose mt-7 max-w-[72ch] text-ink">
+            <div className="journal-prose prose mt-7 max-w-none text-ink">
               <ReactMarkdown
                 components={markdownComponents(SubHeadingTag)}
+                remarkPlugins={markdownPlugins}
               >
-                {trip.ai_recommendation}
+                {normalizeMarkdownTables(trip.ai_recommendation)}
               </ReactMarkdown>
             </div>
           ) : (
             <div
               role="status"
-              className="mt-7 border-y border-rule bg-indigo-light px-5 py-4 text-indigo dark:bg-slate-800/80 dark:text-slate-200 dark:border-slate-700"
+              className="mt-7 border-y border-rule bg-indigo-light px-5 py-4 text-indigo"
             >
               <p className="font-semibold">
                 AI itinerary unavailable for this trip.
               </p>
-              <p className="mt-1 text-sm text-indigo/80 dark:text-slate-400">
+              <p className="mt-1 text-sm text-indigo/80">
                 Deterministic summary and places are preserved above.
               </p>
             </div>

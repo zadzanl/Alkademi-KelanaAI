@@ -4,34 +4,34 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  --paper: #f5f7fa;
-  --paper-light: #ffffff;
-  --ink: #0f172a;
-  --muted-ink: #5a6a80;
-  --rule: #cbd5e1;
-  --control: #78889e;
+  --paper: #FFFFE3;
+  --paper-light: #fffef0;
+  --ink: #11110d;
+  --muted-ink: #57574c;
+  --rule: #b9b9a6;
+  --control: #68685d;
   --terracotta: #0d766e;
   --terracotta-dark: #0f5b55;
-  --indigo: #0b1120;
-  --indigo-light: #ccfbf1;
+  --indigo: #111827;
+  --indigo-light: #d9f5ef;
   --success: #059669;
   --error: #e11d48;
 }
 
 [data-theme="dark"] {
-  /* Dark Mode: Revised Midnight Obsidian (Bright Text Edition) */
-  --paper: #0b0f17;
-  --paper-light: #151d2a;
+  /* OLED black keeps every page-level surface fully off. */
+  --paper: #000000;
+  --paper-light: #111111;
   --ink: #ffffff;
-  --muted-ink: #cbd5e1;
-  --rule: #283548;
-  --control: #475569;
-  --terracotta: #0284c7;
-  --terracotta-dark: #38bdf8;
-  --indigo: #060913;
-  --indigo-light: #1e293b;
+  --muted-ink: #c7c7c7;
+  --rule: #4a4a4a;
+  --control: #a6a6a6;
+  --terracotta: #0f766e;
+  --terracotta-dark: #5eead4;
+  --indigo: #111827;
+  --indigo-light: #1f2937;
   --success: #10b981;
-  --error: #f43f5e;
+  --error: #fb7185;
 }
 
 @theme inline {
@@ -85,8 +85,8 @@ a {
 }
 
 [data-theme="dark"] .category-badge-chip {
-  background-color: #1e293b;
-  color: #38bdf8;
+  background-color: var(--indigo-light);
+  color: var(--terracotta-dark);
 }
 
 .journal-prose {

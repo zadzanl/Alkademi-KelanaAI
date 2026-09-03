@@ -7,10 +7,11 @@ import { createTrip } from "../frontend/src/app/actions.ts";
 import { localErrors, parse422, parseTripId, safeUrl } from "../frontend/src/app/safety.ts";
 import { getTrips, getTrip, generateTrip, TripApiError } from "../frontend/src/services/tripService.ts";
 import { categoryStyle } from "../frontend/src/lib/categoryStyle.ts";
-import { markdownComponents } from "../frontend/src/lib/markdownPolicy.ts";
+import { markdownComponents, markdownPlugins, normalizeMarkdownTables } from "../frontend/src/lib/markdownPolicy.ts";
 import { invalidateTripsCache } from "../frontend/src/lib/tripCache.ts";
 import { months } from "../frontend/src/types/trip.ts";
 import { parseAuthMode, parsePublicUser, upstreamSessionCookie, upstreamSessionMaxAge } from "../frontend/src/services/authService.ts";
+import { RAG_COMPARE_TIMEOUT_MS } from "../frontend/src/services/knowledgeService.ts";
 
 const values = {
 	destination: "Kyoto",
@@ -54,6 +55,28 @@ const validTrip = {
 	created_at: "2026-01-01T00:00:00Z",
 	ai_recommendation: null,
 };
+
+test("RAG comparison uses the dedicated 60 second timeout", () => {
+	assert.equal(RAG_COMPARE_TIMEOUT_MS, 60_000);
+});
+
+test("citation URLs use the existing safe URL policy", () => {
+	assert.equal(safeUrl("javascript:alert(1)"), undefined);
+	assert.equal(safeUrl("https://example.com/guide"), "https://example.com/guide");
+});
+
+test("normalizes flattened Markdown table rows before rendering", () => {
+	const flattened = "| Category | Cost | Notes | |----------|------|-------| | Flights | $350 | Book early | | **Total** | **$350** | Done |";
+	const normalized = normalizeMarkdownTables(flattened);
+	const markup = renderToStaticMarkup(
+		ReactMarkdown({ children: normalized, components: markdownComponents("h3"), remarkPlugins: markdownPlugins }),
+	);
+
+	assert.match(normalized, /\| Category \| Cost \| Notes \|\n\|----------/);
+	assert.match(markup, /<table>/);
+	assert.match(markup, /Flights/);
+	assert.match(markup, /Total/);
+});
 
 test("maps a successful FastAPI response", async () => {
 	process.env.API_URL = "http://api.test";

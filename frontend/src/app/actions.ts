@@ -3,6 +3,8 @@
 import { generateTrip, TripApiError } from "../services/tripService.ts";
 import { localErrors } from "../lib/safety.ts";
 import { invalidateTripsCache } from "../lib/tripCache.ts";
+import { compareRagRecommendation } from "../services/knowledgeService.ts";
+import type { RagComparisonResponse } from "../types/knowledge.ts";
 import type { ActionState, FormValues, TripRequest } from "./types.ts";
 import { authFetch, clearLocalSession, getCurrentUser, parseAuthMode, parsePublicUser, persistUpstreamSession, type AuthMode, type AuthResult } from "../services/authService.ts";
 export type AuthActionState = AuthResult & { submittedUsername?: string; authMode?: AuthMode };
@@ -156,4 +158,9 @@ export async function createTrip(
       submitted,
     };
   }
+}
+
+export async function compareRagRecommendationAction(body: TripRequest): Promise<RagComparisonResponse | { error: string }> {
+  try { return await compareRagRecommendation(body); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Comparison failed. Please try again." }; }
 }

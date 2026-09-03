@@ -10,7 +10,7 @@ export function TripCard({ trip }: TripCardProps) {
   const style = categoryStyle(trip.category);
 
   return (
-    <article className="group relative rounded-[4px] border border-rule bg-paper-light p-5 sm:p-6 transition-all duration-200 hover:border-ink/40 hover:shadow-md dark:hover:border-slate-500">
+    <article className="group relative rounded-[4px] border border-rule bg-paper-light p-5 transition-all duration-200 hover:border-ink/40 hover:shadow-md sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-4 min-w-0">
           {/* Circular Category-Tinted Avatar */}
