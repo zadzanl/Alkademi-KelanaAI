@@ -12,6 +12,17 @@ import { invalidateTripsCache } from "../frontend/src/lib/tripCache.ts";
 import { months } from "../frontend/src/types/trip.ts";
 import { parseAuthMode, parsePublicUser, upstreamSessionCookie, upstreamSessionMaxAge } from "../frontend/src/services/authService.ts";
 import { RAG_COMPARE_TIMEOUT_MS } from "../frontend/src/services/knowledgeService.ts";
+import { chatIdempotencyEnabled } from "../frontend/src/services/chatService.ts";
+import { sendConversationMessageWithKeyAction } from "../frontend/src/app/actions.ts";
+import { readFileSync } from "node:fs";
+import {
+	beginLogicalRetry,
+	canApplySendResult,
+	createLogicalSend,
+	dedupeServerMessage,
+	transitionLogicalSend,
+	upsertLogicalSend,
+} from "../frontend/src/lib/chatState.ts";
 
 const values = {
 	destination: "Kyoto",
@@ -617,19 +628,116 @@ test("tripService forwards request headers and preserves 14-field responses", as
 	assert.ok(capturedHeaders !== undefined);
 });
 
-test("tripService maps non-JSON 401 responses to unauthorized error kind", async () => {
+test("chatService maps 401 to unauthorized error kind", async () => {
 	process.env.API_URL = "http://api.test";
+	const { createConversation, listConversations, getConversationMessages, sendConversationMessage, renameConversation } = await import("../frontend/src/services/chatService.ts");
 
-	// HTML or plain-text 401 response from proxy
-	globalThis.fetch = async () =>
-		new Response("<html><body>401 Unauthorized</body></html>", {
-			status: 401,
-			headers: { "content-type": "text/html" },
-		});
-
+	// Without session cookie header mock, getSessionCookieHeader returns null -> unauthorized
 	await assert.rejects(
-		async () => getTrips(),
+		async () => createConversation(),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+	await assert.rejects(
+		async () => listConversations(),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+	await assert.rejects(
+		async () => getConversationMessages(1),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+	await assert.rejects(
+		async () => sendConversationMessage(1, "hello"),
+		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
+	);
+	await assert.rejects(
+		async () => renameConversation(1, "new title"),
 		(err: unknown) => err instanceof TripApiError && err.kind === "unauthorized" && err.status === 401,
 	);
 });
+
+test("chat idempotency flags are opt-in and require both flags", async () => {
+
+	const previousServer = process.env.CHAT_IDEMPOTENCY_ENABLED;
+	const previousPublic = process.env.NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED;
+	delete process.env.CHAT_IDEMPOTENCY_ENABLED;
+	delete process.env.NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED;
+	assert.equal(chatIdempotencyEnabled(), false);
+	const disabledResult = await sendConversationMessageWithKeyAction(1, "hello", "00000000-0000-4000-8000-000000000000");
+	assert.equal(disabledResult.ok, false);
+	if (!disabledResult.ok) assert.equal(disabledResult.code, "chat_idempotency_unavailable");
+
+	process.env.CHAT_IDEMPOTENCY_ENABLED = "true";
+	assert.equal(chatIdempotencyEnabled(), false);
+	const mismatchResult = await sendConversationMessageWithKeyAction(1, "hello", "00000000-0000-4000-8000-000000000000");
+	assert.equal(mismatchResult.ok, false);
+	if (!mismatchResult.ok) assert.equal(mismatchResult.kind, "configuration");
+
+	process.env.NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED = "true";
+	assert.equal(chatIdempotencyEnabled(), true);
+	if (previousServer === undefined) delete process.env.CHAT_IDEMPOTENCY_ENABLED;
+	else process.env.CHAT_IDEMPOTENCY_ENABLED = previousServer;
+	if (previousPublic === undefined) delete process.env.NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED;
+	else process.env.NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED = previousPublic;
+});
+
+test("logical send transitions preserve one item, content, and stable retry key", () => {
+	const key = "769d1854-0471-4fab-9a6b-72a5a4a74dc0";
+	const initial = createLogicalSend(7, "Keep this question", "2026-09-04T10:00:00Z", key, key);
+	let items = upsertLogicalSend([], initial);
+	items = transitionLogicalSend(items, key, {
+		status: "failed",
+		retryable: true,
+		recovery: "retry",
+		statusText: "Retry with the same request key.",
+	});
+	items = beginLogicalRetry(items, key);
+	items = upsertLogicalSend(items, items[0]);
+
+	assert.equal(items.length, 1);
+	assert.equal(items[0].clientKey, key);
+	assert.equal(items[0].content, "Keep this question");
+	assert.equal(items[0].status, "pending");
+});
+
+test("logical send reconciliation dedupes an authoritative assistant by server id", () => {
+	const assistant = { id: 41, content: "Answer" };
+	assert.deepEqual(dedupeServerMessage([assistant], assistant), [assistant]);
+	assert.equal(dedupeServerMessage([], assistant).length, 1);
+});
+
+test("late send results apply only to the matching active origin generation", () => {
+	assert.equal(canApplySendResult(1, 1, 4, 4), true);
+	assert.equal(canApplySendResult(1, 2, 4, 5), false);
+	assert.equal(canApplySendResult(1, 1, 4, 5), false);
+});
+
+test("ambiguous keyed outcomes preserve content but expose no POST retry", () => {
+	const key = "769d1854-0471-4fab-9a6b-72a5a4a74dc0";
+	const initial = createLogicalSend(7, "Do not resend me", "2026-09-04T10:00:00Z", key, key);
+	const [ambiguous] = transitionLogicalSend([initial], key, {
+		status: "failed",
+		retryable: false,
+		recovery: "refresh",
+		statusText: "The keyed result is uncertain. Refresh; do not resend this message.",
+	});
+
+	assert.equal(ambiguous.content, initial.content);
+	assert.equal(ambiguous.clientKey, key);
+	assert.equal(ambiguous.retryable, false);
+	assert.equal(ambiguous.recovery, "refresh");
+});
+
+test("chat composer and rename remain parent-controlled until acceptance", () => {
+	const inputSource = readFileSync(new URL("../frontend/src/components/chat/ChatInput.tsx", import.meta.url), "utf8");
+	const pageSource = readFileSync(new URL("../frontend/src/app/chat/page.tsx", import.meta.url), "utf8");
+	const sidebarSource = readFileSync(new URL("../frontend/src/components/chat/ChatSidebar.tsx", import.meta.url), "utf8");
+
+	assert.match(inputSource, /content: string/);
+	assert.doesNotMatch(inputSource, /setContent\(""\)/);
+	assert.match(pageSource, /setComposerContent\(""\)/);
+	assert.match(pageSource, /Your draft is preserved/);
+	assert.match(sidebarSource, /if \(result\.ok\)/);
+	assert.match(sidebarSource, /setRenameError\(result\.error/);
+});
+
 

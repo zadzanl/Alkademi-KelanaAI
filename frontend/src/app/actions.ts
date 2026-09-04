@@ -6,6 +6,7 @@ import { invalidateTripsCache } from "../lib/tripCache.ts";
 import { compareRagRecommendation } from "../services/knowledgeService.ts";
 import type { RagComparisonResponse } from "../types/knowledge.ts";
 import type { ActionState, FormValues, TripRequest } from "./types.ts";
+import type { ChatActionResult, Conversation, ConversationCreateResponse, Message } from "../types/chat.ts";
 import { authFetch, clearLocalSession, getCurrentUser, parseAuthMode, parsePublicUser, persistUpstreamSession, type AuthMode, type AuthResult } from "../services/authService.ts";
 export type AuthActionState = AuthResult & { submittedUsername?: string; authMode?: AuthMode };
 
@@ -164,3 +165,79 @@ export async function compareRagRecommendationAction(body: TripRequest): Promise
   try { return await compareRagRecommendation(body); }
   catch (error) { return { error: error instanceof Error ? error.message : "Comparison failed. Please try again." }; }
 }
+
+function chatFailure(error: unknown, fallback: string): ChatActionResult<never> {
+  const apiError = error instanceof TripApiError ? error : null;
+  return {
+    ok: false,
+    error: apiError?.message ?? fallback,
+    kind: apiError?.kind ?? "network",
+    status: apiError?.status,
+    code: apiError?.code,
+    retryAfterSeconds: apiError?.retryAfterSeconds,
+  };
+}
+
+export async function createConversationAction(title?: string): Promise<ChatActionResult<ConversationCreateResponse>> {
+  try {
+    const { createConversation } = await import("../services/chatService.ts");
+    const result = await createConversation(title);
+    return { ok: true, data: result };
+  } catch (error) {
+    return chatFailure(error, "Failed to create conversation.");
+  }
+}
+
+export async function listConversationsAction(): Promise<ChatActionResult<Conversation[]>> {
+  try {
+    const { listConversations } = await import("../services/chatService.ts");
+    const result = await listConversations();
+    return { ok: true, data: result };
+  } catch (error) {
+    return chatFailure(error, "Failed to load conversations.");
+  }
+}
+
+export async function getConversationMessagesAction(conversationId: number): Promise<ChatActionResult<Message[]>> {
+  try {
+    const { getConversationMessages } = await import("../services/chatService.ts");
+    const result = await getConversationMessages(conversationId);
+    return { ok: true, data: result };
+  } catch (error) {
+    return chatFailure(error, "Failed to load messages.");
+  }
+}
+
+export async function sendConversationMessageAction(conversationId: number, content: string): Promise<ChatActionResult<Message>> {
+  try {
+    const { sendConversationMessage } = await import("../services/chatService.ts");
+    const result = await sendConversationMessage(conversationId, content);
+    return { ok: true, data: result };
+  } catch (error) {
+    return chatFailure(error, "Failed to send message.");
+  }
+}
+
+export async function sendConversationMessageWithKeyAction(conversationId: number, content: string, idempotencyKey: string): Promise<ChatActionResult<Message>> {
+  if (process.env.CHAT_IDEMPOTENCY_ENABLED?.trim().toLowerCase() !== "true" || process.env.NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED?.trim().toLowerCase() !== "true") {
+    return { ok: false, error: "Keyed retry is not available in this deployment. Refresh and try again.", code: "chat_idempotency_unavailable", kind: "configuration" as const };
+  }
+  try {
+    const { sendConversationMessage } = await import("../services/chatService.ts");
+    const result = await sendConversationMessage(conversationId, content, idempotencyKey);
+    return { ok: true, data: result };
+  } catch (error) {
+    return chatFailure(error, "Failed to send message.");
+  }
+}
+
+export async function renameConversationAction(conversationId: number, title: string): Promise<ChatActionResult<Conversation>> {
+  try {
+    const { renameConversation } = await import("../services/chatService.ts");
+    const result = await renameConversation(conversationId, title);
+    return { ok: true, data: result };
+  } catch (error) {
+    return chatFailure(error, "Failed to rename conversation.");
+  }
+}
+

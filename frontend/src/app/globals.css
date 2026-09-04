@@ -6,6 +6,7 @@
 :root {
   --paper: #FFFFE3;
   --paper-light: #fffef0;
+  --paper-surface: #ffffff;
   --ink: #11110d;
   --muted-ink: #57574c;
   --rule: #b9b9a6;
@@ -22,6 +23,7 @@
   /* OLED black keeps every page-level surface fully off. */
   --paper: #000000;
   --paper-light: #111111;
+  --paper-surface: #1a1a1a;
   --ink: #ffffff;
   --muted-ink: #c7c7c7;
   --rule: #4a4a4a;
@@ -37,6 +39,7 @@
 @theme inline {
   --color-paper: var(--paper);
   --color-paper-light: var(--paper-light);
+  --color-paper-surface: var(--paper-surface);
   --color-ink: var(--ink);
   --color-muted-ink: var(--muted-ink);
   --color-rule: var(--rule);

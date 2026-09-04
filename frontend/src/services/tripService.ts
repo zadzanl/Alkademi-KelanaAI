@@ -21,18 +21,24 @@ export class TripApiError extends Error {
   readonly kind: TripErrorKind;
   readonly status?: number;
   readonly fieldErrors?: Partial<Record<string, string>>;
+  readonly code?: string;
+  readonly retryAfterSeconds?: number;
 
   constructor(
     kind: TripErrorKind,
     message: string,
     status?: number,
     fieldErrors?: Partial<Record<string, string>>,
+    code?: string,
+    retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "TripApiError";
     this.kind = kind;
     this.status = status;
     this.fieldErrors = fieldErrors;
+    this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

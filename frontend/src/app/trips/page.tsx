@@ -46,12 +46,20 @@ export default async function TripsPage({ searchParams }: TripsPageProps) {
       <main className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
         {/* Top Action Bar */}
         <div className="mb-8 flex items-center justify-between border-b border-rule pb-4">
-          <Link
-            href="/"
-            className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted-ink transition-colors hover:text-ink focus-visible:outline-terracotta"
-          >
-            ← Back to Planner
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/"
+              className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted-ink transition-colors hover:text-ink focus-visible:outline-terracotta"
+            >
+              ← Back to Planner
+            </Link>
+            <Link
+              href="/chat"
+              className="inline-flex min-h-[44px] items-center text-sm font-semibold text-terracotta-dark transition-colors hover:underline focus-visible:outline-terracotta"
+            >
+              💬 Travel Assistant
+            </Link>
+          </div>
           <Link
             href="/#planner"
             className="inline-flex min-h-[44px] items-center text-sm font-bold text-terracotta-dark transition-colors hover:underline focus-visible:outline-terracotta"
