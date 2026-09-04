@@ -154,3 +154,4 @@ openspec/
 AGENTS.md
 .agents/
 skills-lock.json
+.neon
