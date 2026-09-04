@@ -118,6 +118,32 @@ ALTER TABLE trips ADD COLUMN IF NOT EXISTS ai_recommendation TEXT;
 
 Verify with `\d trips` (or an `information_schema.columns` query): `ai_recommendation` is nullable and has type `text`. The `IF NOT EXISTS` guard means the statement is safe to re-run.
 
+### 3b. Migrate the keyed conversation request ledger
+
+`Base.metadata.create_all()` creates missing registered tables but does not upgrade existing tables. Back up an existing PostgreSQL database, then run the additive ledger migration directly without calling `init_db()` first:
+
+```powershell
+@'
+import os
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from backend.migrations import migrate_conversation_message_requests_schema, verify_conversation_message_requests_schema
+load_dotenv()
+engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+try:
+  with engine.begin() as conn: print(migrate_conversation_message_requests_schema(conn))
+  with engine.connect() as conn: print(verify_conversation_message_requests_schema(conn))
+  with engine.begin() as conn: print(migrate_conversation_message_requests_schema(conn))
+  with engine.connect() as conn: print(verify_conversation_message_requests_schema(conn))
+finally:
+  engine.dispose()
+'@ | python -
+```
+
+The second migration must report `created: False` and both verification calls must report `verified: True`. Partial or incompatible tables fail closed; existing keyless messages are never backfilled. Prerequisites are existing `public.users`, `public.conversations`, and `public.messages` tables. The verifier checks the identity metadata, timestamp defaults, named constraint definitions, four cascading foreign keys, nullable assistant linkage, exact index columns, and partial `status = 'processing'` predicate. Completed rows are retained indefinitely and cascade with their user or conversation. The server-only `CHAT_IDEMPOTENCY_ENABLED` and public `NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED` flags both default to `false`; disable the server flag first during rollback, then the public flag. Do not drop the ledger after keyed traffic.
+
+For a separate fresh-bootstrap smoke test, use an empty database containing the prerequisite tables, import `backend.main`, enter `TestClient(app)` (or call `init_db()`), and then run the same catalog verifier. This is separate evidence from the existing-schema migration path; `create_all()` creates registered missing tables but never upgrades partial tables.
+
 ### 4. Run the API
 
 ```bash

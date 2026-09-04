@@ -4,10 +4,9 @@ Owns environment loading, the SQLAlchemy `Base`, the lazy-bound session factory,
 `init_db()`, and request-scoped `get_db()` dependency. 
 Live PostgreSQL runtime is verified (the full `unittest` suite 
 and live e2e POST/GET/PUT/DELETE run against the local `kelanaai` database).
-`Base.metadata.create_all()` is **create-only**: 
-it creates `trips` table when missing, 
-but it does **not** structurally migrate an existing table. 
-Any schema change to `trips` therefore requires a separate, manual, ALTER TABLE 
+`Base.metadata.create_all()` is **create-only**: it creates all currently
+registered missing tables, but does **not** structurally migrate an existing
+table. Any schema change therefore requires a separate manual migration.
 `ai_recommendation` was added via 
 `ALTER TABLE trips ADD COLUMN IF NOT EXISTS ai_recommendation TEXT;`. 
 URLs in error messages and intentionally use a redacted placeholder shape, 
@@ -46,7 +45,7 @@ _engine: Engine | None = None
 
 
 def init_db() -> None:
-    """Bind the engine and create the `trips` table if it is missing.
+    """Bind the engine and create all registered missing tables.
 
     Runs once when the FastAPI lifespan starts the app, before any request
     can reach a handler. `init_db()` is **not** retryable in-process: the

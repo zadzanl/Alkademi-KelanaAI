@@ -221,6 +221,52 @@ class AiServiceTests(unittest.TestCase):
         request = client.post.call_args.kwargs["json"]
         self.assertEqual(request["contents"]["text"]["maxCharacters"], 2000)
 
+    def test_generate_chat_response_empty_messages(self) -> None:
+        self.assertIsNone(ai_service.generate_chat_response([]))
+
+    def test_generate_chat_response_missing_config_returns_none(self) -> None:
+        with self.assertLogs(ai_service.logger, level="WARNING") as logs:
+            self.assertIsNone(ai_service.generate_chat_response([{"role": "user", "content": "hi"}]))
+        self.assertIn("error_type=config_error", "\n".join(logs.output))
+
+    @patch.object(ai_service, "_call_openrouter_chat", return_value="openrouter chat reply")
+    def test_generate_chat_response_openrouter(self, mock_chat) -> None:
+        os.environ.update(OPENROUTER_API_KEY="key", OPENROUTER_MODEL="model")
+        messages = [{"role": "user", "content": "hello"}]
+        reply = ai_service.generate_chat_response(messages)
+        self.assertEqual(reply, "openrouter chat reply")
+        mock_chat.assert_called_once()
+        sent_messages = mock_chat.call_args[0][0]
+        self.assertEqual(sent_messages[0]["role"], "system")
+        self.assertEqual(sent_messages[1]["role"], "user")
+
+    @patch.object(ai_service, "_call_bedrock_chat", return_value="bedrock chat reply")
+    def test_generate_chat_response_bedrock(self, mock_chat) -> None:
+        os.environ.update(AWS_REGION="us-east-1", MODEL_ID="anthropic.claude")
+        messages = [{"role": "user", "content": "hello"}]
+        reply = ai_service.generate_chat_response(messages)
+        self.assertEqual(reply, "bedrock chat reply")
+        mock_chat.assert_called_once()
+
+    @patch.object(ai_service, "_call_openrouter_chat", return_value="trimmed reply")
+    def test_generate_chat_response_context_trimming(self, mock_chat) -> None:
+        os.environ.update(OPENROUTER_API_KEY="key", OPENROUTER_MODEL="model", MAX_CHAT_CONTEXT_MESSAGES="3")
+        messages = [
+            {"role": "user", "content": "1"},
+            {"role": "assistant", "content": "2"},
+            {"role": "user", "content": "3"},
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "5"},
+        ]
+        reply = ai_service.generate_chat_response(messages)
+        self.assertEqual(reply, "trimmed reply")
+        sent_messages = mock_chat.call_args[0][0]
+        # System prompt + 3 trimmed messages = 4 items
+        self.assertEqual(len(sent_messages), 4)
+        self.assertEqual(sent_messages[1]["content"], "3")
+        self.assertEqual(sent_messages[2]["content"], "4")
+        self.assertEqual(sent_messages[3]["content"], "5")
+
 
 if __name__ == "__main__":
     unittest.main()

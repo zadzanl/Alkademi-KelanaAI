@@ -478,6 +478,122 @@ def _provider_generation(prompt: str) -> str | None:
     return None
 
 
+DEFAULT_CHAT_SYSTEM_PROMPT = (
+    "You are KelanaAI, an expert travel assistant specializing in practical, "
+    "culturally sensitive, and budget-conscious travel advice for Indonesia and worldwide. "
+    "Be concise, helpful, and directly address the user's travel questions. "
+    "Format your responses cleanly in Markdown."
+)
+
+
+def _call_openrouter_chat(messages: list[dict[str, str]]) -> str | None:
+    global _httpx_client
+    try:
+        body = {
+            "model": os.environ["OPENROUTER_MODEL"],
+            "messages": messages,
+        }
+        if NEMOTRON_MODEL in body["model"]:
+            body["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": True, "low_effort": True}
+            }
+        elif GLM_MODEL in body["model"]:
+            body["reasoning"] = {"effort": "high"}
+        elif DEEPSEEK_MODEL in body["model"]:
+            body["reasoning"] = {"effort": "low"}
+        if _httpx_client is None:
+            with _httpx_lock:
+                if _httpx_client is None:
+                    _httpx_client = httpx.Client(timeout=15)
+        response = _httpx_client.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+                "X-OpenRouter-Title": "KelanaAI",
+            },
+            json=body,
+            timeout=15,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("malformed provider response")
+        return content.strip()
+    except Exception:
+        logger.error(
+            "OpenRouter chat failed error_type=runtime_error: %s",
+            _redact_secrets(traceback.format_exc()),
+        )
+        return None
+
+
+def _call_bedrock_chat(messages: list[dict[str, str]], system_prompt: str = DEFAULT_CHAT_SYSTEM_PROMPT) -> str | None:
+    try:
+        bedrock_messages = []
+        for m in messages:
+            role = "user" if m.get("role") == "user" else "assistant"
+            bedrock_messages.append({
+                "role": role,
+                "content": [{"text": m.get("content", "")}]
+            })
+        if not bedrock_messages:
+            return None
+        # Bedrock Converse requires first message to be from 'user'
+        if bedrock_messages[0]["role"] != "user":
+            bedrock_messages = bedrock_messages[1:]
+        if not bedrock_messages:
+            return None
+
+        kwargs: dict[str, Any] = {
+            "modelId": os.environ["MODEL_ID"],
+            "messages": bedrock_messages,
+        }
+        if system_prompt:
+            kwargs["system"] = [{"text": system_prompt}]
+
+        content = _get_boto_client("bedrock-runtime").converse(**kwargs)["output"]["message"]["content"][0]["text"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("malformed provider response")
+        return content.strip()
+    except Exception:
+        logger.error(
+            "Bedrock chat failed error_type=runtime_error: %s",
+            _redact_secrets(traceback.format_exc()),
+        )
+        return None
+
+
+def generate_chat_response(messages: list[dict[str, str]]) -> str | None:
+    """Generate an AI assistant chat response given a list of prior message turns.
+    
+    Applies sliding-window trimming to bound the context window (default 20 messages).
+    """
+    if not messages:
+        return None
+    max_context = int(os.getenv("MAX_CHAT_CONTEXT_MESSAGES", "20"))
+    trimmed = messages[-max_context:] if len(messages) > max_context else messages
+
+    if _configured("OPENROUTER_API_KEY") and _configured("OPENROUTER_MODEL"):
+        formatted = [{"role": "system", "content": DEFAULT_CHAT_SYSTEM_PROMPT}]
+        for m in trimmed:
+            formatted.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+        return _call_openrouter_chat(formatted)
+
+    if _configured("AWS_REGION") and _configured("MODEL_ID"):
+        return _call_bedrock_chat(trimmed, system_prompt=DEFAULT_CHAT_SYSTEM_PROMPT)
+
+    missing = [
+        x
+        for x in ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", "AWS_REGION", "MODEL_ID")
+        if not _configured(x)
+    ]
+    logger.warning(
+        "provider=none error_type=config_error: required env vars absent or empty for chat: %s",
+        ", ".join(missing),
+    )
+    return None
+
+
 def _comparison_citations(
     kb: list[dict[str, Any]], web: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:

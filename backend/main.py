@@ -19,23 +19,31 @@ treat the `#` comments and module/class docstrings as developer-facing.
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from math import ceil
+import hashlib
 import os
 import re
 import json
 import logging
+import secrets
 import threading
 import time
 from typing import AsyncIterator
+from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, init_db
+from backend.models.conversation import Conversation
+from backend.models.conversation_message_request import ConversationMessageRequest
+from backend.models.message import Message
 from backend.models.session import Session as AuthSession
 from backend.models.trip import Trip
 from backend.models.user import User
@@ -48,6 +56,7 @@ from backend.services.auth_service import (
     verify_password,
 )
 from backend.services.ai_service import (
+    generate_chat_response,
     generate_rag_comparison,
     get_ai_recommendation,
     log_ai_provider_config,
@@ -87,6 +96,61 @@ if AUTH_SESSION_TTL_SECONDS <= 0:
     raise RuntimeError("AUTH_SESSION_TTL_SECONDS must be a positive integer.")
 AUTH_COOKIE_SECURE = os.getenv("ENVIRONMENT", "development").lower() == "production"
 GENERIC_AUTH_ERROR = "Invalid username or password."
+CHAT_REQUEST_LEASE_SECONDS = 120
+CHAT_IDEMPOTENCY_MARKER = "v1"
+_CHAT_FALLBACK = ("I'm sorry, I am currently unable to generate a response. "
+                  "Please check back in a moment or try rephrasing your question.")
+
+def _key_error(code: str, message: str, status_code: int, headers: dict[str, str] | None = None) -> HTTPException:
+    error_headers = {"X-KelanaAI-Chat-Idempotency": CHAT_IDEMPOTENCY_MARKER}
+    if headers:
+        error_headers.update(headers)
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message}, headers=error_headers)
+
+def _parse_idempotency_key(value: str | None) -> tuple[str, str] | None:
+    if value is None:
+        return None
+    if len(value) > 36 or value != value.strip() or not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value
+    ):
+        raise _key_error("idempotency_key_invalid", "Idempotency-Key must be a UUIDv4.", 422)
+    try:
+        parsed = UUID(value)
+    except ValueError:
+        raise _key_error("idempotency_key_invalid", "Idempotency-Key must be a UUIDv4.", 422) from None
+    if parsed.version != 4:
+        raise _key_error("idempotency_key_invalid", "Idempotency-Key must be a UUIDv4.", 422)
+    canonical = str(parsed)
+    return canonical, hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+def _content_digest(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+def _integrity_error() -> HTTPException:
+    return _key_error("chat_request_integrity_error", "The message request state is inconsistent. Refresh the conversation.", 500)
+
+def _generation_error() -> HTTPException:
+    return _key_error("chat_generation_unavailable", "The assistant could not complete this message. Retry with the same Idempotency-Key.", 503)
+
+def _valid_user_message(message: Message | None, conversation_id: int, content: str) -> bool:
+    return bool(message and message.conversation_id == conversation_id and message.role == "user" and message.content == content)
+
+def _valid_history(history: list[Message], conversation_id: int) -> bool:
+    return all(message.conversation_id == conversation_id and message.role in {"user", "assistant"} for message in history)
+
+def _expire_claim(db: Session, ledger_id: int, claim_token: str) -> bool:
+    """Best-effort release of only this claimant's recoverable lease."""
+    try:
+        changed = db.query(ConversationMessageRequest).filter(
+            ConversationMessageRequest.id == ledger_id,
+            ConversationMessageRequest.status == "processing",
+            ConversationMessageRequest.claim_token == claim_token,
+        ).update({"lease_expires_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}, synchronize_session=False)
+        db.commit()
+        return changed == 1
+    except Exception:
+        db.rollback()
+        return False
 
 
 @app.exception_handler(RequestValidationError)
@@ -194,6 +258,48 @@ class PublicUser(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ConversationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=256)
+
+
+class ConversationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=256)
+
+
+class ConversationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    created_at: datetime
+
+
+class ConversationCreateResponse(BaseModel):
+    conversation_id: int
+    title: str
+    created_at: datetime
+
+
+class MessageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    conversation_id: int
+    role: str
+    content: str
+    created_at: datetime
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -477,3 +583,281 @@ def delete_trip(
     db.delete(row)
     db.commit()
     return Response(status_code=204)
+
+
+# =====================================================================
+# Conversational Assistant Endpoints
+# =====================================================================
+
+
+@app.post(
+    "/api/v1/conversations",
+    response_model=ConversationCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_conversation(
+    payload: ConversationCreate | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ConversationCreateResponse:
+    """Create a new chat conversation owned by the authenticated user."""
+    title = (payload.title.strip() if payload and payload.title and payload.title.strip() else "New Conversation")
+    conv = Conversation(user_id=user.id, title=title)
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return ConversationCreateResponse(
+        conversation_id=conv.id,
+        title=conv.title,
+        created_at=conv.created_at,
+    )
+
+
+@app.get("/api/v1/conversations", response_model=list[ConversationResponse])
+def list_conversations(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[ConversationResponse]:
+    """List all conversations owned by the authenticated user in reverse chronological order."""
+    conversations = (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user.id)
+        .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+        .all()
+    )
+    return [ConversationResponse.model_validate(c) for c in conversations]
+
+
+@app.get("/api/v1/conversations/{conversation_id}/messages", response_model=list[MessageResponse])
+def get_conversation_messages(
+    conversation_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[MessageResponse]:
+    """Retrieve full chronological message history for an owned conversation."""
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.user_id == user.id)
+        .first()
+    )
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+        .all()
+    )
+    return [MessageResponse.model_validate(m) for m in messages]
+
+
+@app.post(
+    "/api/v1/conversations/{conversation_id}/messages",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_conversation_message(
+    conversation_id: int,
+    payload: MessageCreate,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    """Send a user message, assemble multi-turn context, generate AI reply, and persist both."""
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.user_id == user.id)
+        .first()
+    )
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if idempotency_key is not None:
+        response.headers["X-KelanaAI-Chat-Idempotency"] = CHAT_IDEMPOTENCY_MARKER
+    parsed_key = _parse_idempotency_key(idempotency_key)
+    if parsed_key is not None:
+        _canonical_key, key_digest = parsed_key
+        content = payload.content.strip()
+        content_digest = _content_digest(content)
+        now = datetime.now(timezone.utc)
+        claim_token = secrets.token_hex(32)
+        lease = now.timestamp() + CHAT_REQUEST_LEASE_SECONDS
+        ledger = None
+        try:
+            user_msg = Message(conversation_id=conversation_id, role="user", content=content)
+            db.add(user_msg)
+            db.flush()
+            if conv.title == "New Conversation" and content:
+                conv.title = content[:40].strip()
+            ledger = ConversationMessageRequest(
+                user_id=user.id, conversation_id=conversation_id, key_digest=key_digest,
+                content_digest=content_digest, status="processing", user_message_id=user_msg.id,
+                claim_token=claim_token, lease_expires_at=datetime.fromtimestamp(lease, timezone.utc),
+            )
+            db.add(ledger)
+            db.commit()
+            db.refresh(user_msg)
+        except IntegrityError:
+            db.rollback()
+            try:
+                ledger = db.query(ConversationMessageRequest).filter(
+                    ConversationMessageRequest.user_id == user.id,
+                    ConversationMessageRequest.conversation_id == conversation_id,
+                    ConversationMessageRequest.key_digest == key_digest,
+                ).first()
+                if ledger is None:
+                    raise _integrity_error()
+                if ledger.user_id != user.id or ledger.conversation_id != conversation_id:
+                    raise _integrity_error()
+                if ledger.content_digest != content_digest:
+                    raise _key_error("idempotency_key_conflict", "This Idempotency-Key was already used for different message content.", 409)
+                if ledger.status == "completed":
+                    assistant = db.get(Message, ledger.assistant_message_id)
+                    linked = db.get(Message, ledger.user_message_id)
+                    if not _valid_user_message(linked, conversation_id, content) or not assistant or assistant.conversation_id != conversation_id or assistant.role != "assistant":
+                        raise _integrity_error()
+                    response.status_code = 200
+                    return MessageResponse.model_validate(assistant)
+                if ledger.status != "processing" or not ledger.claim_token or not ledger.lease_expires_at:
+                    raise _integrity_error()
+                if ledger.lease_expires_at > now:
+                    response.headers["Retry-After"] = str(max(1, min(CHAT_REQUEST_LEASE_SECONDS, ceil((ledger.lease_expires_at - now).total_seconds()))))
+                    raise _key_error("idempotency_key_in_progress", "A message with this Idempotency-Key is still being processed. Retry with the same key.", 409, {"Retry-After": response.headers["Retry-After"]})
+                old_token = ledger.claim_token
+                new_token = secrets.token_hex(32)
+                recovery_lease = datetime.now(timezone.utc).timestamp() + CHAT_REQUEST_LEASE_SECONDS
+                changed = db.query(ConversationMessageRequest).filter(
+                    ConversationMessageRequest.id == ledger.id,
+                    ConversationMessageRequest.status == "processing",
+                    ConversationMessageRequest.claim_token == old_token,
+                    ConversationMessageRequest.lease_expires_at <= now,
+                ).update({"claim_token": new_token, "lease_expires_at": datetime.fromtimestamp(recovery_lease, timezone.utc), "updated_at": now}, synchronize_session=False)
+                if changed != 1:
+                    db.rollback()
+                    current = db.query(ConversationMessageRequest).filter(ConversationMessageRequest.id == ledger.id).first()
+                    if current is None or current.status not in {"processing", "completed"}:
+                        raise _integrity_error()
+                    if current.status == "completed":
+                        assistant = db.get(Message, current.assistant_message_id)
+                        linked = db.get(Message, current.user_message_id)
+                        if not _valid_user_message(linked, conversation_id, content) or not assistant or assistant.conversation_id != conversation_id or assistant.role != "assistant":
+                            raise _integrity_error()
+                        response.status_code = 200
+                        return MessageResponse.model_validate(assistant)
+                    response.headers["Retry-After"] = str(max(1, min(CHAT_REQUEST_LEASE_SECONDS, ceil((current.lease_expires_at - datetime.now(timezone.utc)).total_seconds()))))
+                    raise _key_error("idempotency_key_in_progress", "A message with this Idempotency-Key is still being processed. Retry with the same key.", 409, {"Retry-After": response.headers["Retry-After"]})
+                db.commit()
+                claim_token = new_token
+                user_msg = db.get(Message, ledger.user_message_id)
+                if not _valid_user_message(user_msg, conversation_id, content):
+                    raise _integrity_error()
+            except HTTPException:
+                db.rollback()
+                raise
+            except Exception:
+                db.rollback()
+                raise _generation_error()
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            raise _generation_error()
+
+        try:
+            history = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.asc(), Message.id.asc()).all()
+            if not _valid_history(history, conversation_id) or not _valid_user_message(user_msg, conversation_id, content):
+                raise _integrity_error()
+            message_dicts = [{"role": m.role, "content": m.content} for m in history]
+            db.rollback()
+            ai_reply_text = generate_chat_response(message_dicts) or _CHAT_FALLBACK
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            _expire_claim(db, ledger.id, claim_token)
+            raise _generation_error()
+        try:
+            assistant_msg = Message(conversation_id=conversation_id, role="assistant", content=ai_reply_text)
+            db.add(assistant_msg)
+            db.flush()
+            changed = db.query(ConversationMessageRequest).filter(ConversationMessageRequest.id == ledger.id, ConversationMessageRequest.status == "processing", ConversationMessageRequest.claim_token == claim_token).update({"status": "completed", "assistant_message_id": assistant_msg.id, "claim_token": None, "lease_expires_at": None, "completed_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}, synchronize_session=False)
+            if changed != 1:
+                db.rollback()
+                raise _integrity_error()
+            db.commit()
+            db.refresh(assistant_msg)
+            return MessageResponse.model_validate(assistant_msg)
+        except HTTPException:
+            _expire_claim(db, ledger.id, claim_token)
+            raise
+        except Exception:
+            db.rollback()
+            _expire_claim(db, ledger.id, claim_token)
+            raise _generation_error()
+
+    user_msg = Message(
+        conversation_id=conversation_id,
+        role="user",
+        content=payload.content.strip(),
+    )
+    db.add(user_msg)
+
+    # Auto-title conversation if it still has the default title
+    if conv.title == "New Conversation":
+        snippet = payload.content.strip()[:40].strip()
+        if snippet:
+            conv.title = snippet
+
+    db.commit()
+    db.refresh(user_msg)
+
+    # Load prior conversation history up to sliding-window context
+    prior_messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+        .all()
+    )
+    message_dicts = [{"role": m.role, "content": m.content} for m in prior_messages]
+
+    ai_reply_text = generate_chat_response(message_dicts)
+    if not ai_reply_text:
+        ai_reply_text = _CHAT_FALLBACK
+
+    assistant_msg = Message(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=ai_reply_text,
+    )
+    db.add(assistant_msg)
+    db.commit()
+    db.refresh(assistant_msg)
+
+    return MessageResponse.model_validate(assistant_msg)
+
+
+@app.patch("/api/v1/conversations/{conversation_id}", response_model=ConversationResponse)
+def rename_conversation(
+    conversation_id: int,
+    payload: ConversationUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ConversationResponse:
+    """Rename a conversation thread owned by the authenticated user."""
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.user_id == user.id)
+        .first()
+    )
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    conv.title = payload.title.strip()
+    db.commit()
+    db.refresh(conv)
+    return ConversationResponse.model_validate(conv)
+
