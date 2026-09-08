@@ -7,6 +7,8 @@ import {
   normalizeMarkdownTables,
 } from "../lib/markdownPolicy.ts";
 import type { TripResponse } from "../types/trip.ts";
+import { formatMoney } from "../lib/formatMoney.ts";
+import { TripResultActions } from "./TripResultActions.tsx";
 
 export interface TripDetailViewProps {
   trip: TripResponse;
@@ -69,7 +71,7 @@ export function TripDetailView({
             <li>
               <Link
                 href="/"
-                className="transition-colors hover:text-ink focus-visible:outline-terracotta"
+                className="transition-colors hover:text-ink focus-visible:outline-focus-ring"
               >
                 Home
               </Link>
@@ -80,7 +82,7 @@ export function TripDetailView({
             <li>
               <Link
                 href={backHref}
-                className="inline-flex items-center gap-1 transition-colors hover:text-terracotta-dark focus-visible:outline-terracotta"
+                className="inline-flex items-center gap-1 transition-colors hover:text-terracotta-dark focus-visible:outline-focus-ring"
               >
                 <span aria-hidden="true">←</span>
                 <span>{backLabel}</span>
@@ -100,8 +102,8 @@ export function TripDetailView({
       )}
 
       {/* 2. Destination Header & Metadata Strip */}
-      <header className="border-t border-ink pt-5">
-        <div className="grid gap-5 border-b border-rule pb-9 md:grid-cols-[1fr_auto] md:items-end">
+      <header className="border-t border-surface-rule pt-5">
+        <div className="grid gap-5 border-b border-surface-rule pb-9 md:grid-cols-[1fr_auto] md:items-end">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-muted-ink">
               <span className="tabular">Trip #{trip.id}</span>
@@ -141,27 +143,27 @@ export function TripDetailView({
       {/* 3. Budget & Logistics Cards Grid */}
       <section
         aria-label="Trip Budget and Logistics"
-        className="grid gap-0 border-b border-rule lg:grid-cols-[1.35fr_0.8fr_0.65fr]"
+        className="grid gap-0 border-b border-surface-rule lg:grid-cols-[1.35fr_0.8fr_0.65fr]"
       >
         {/* Total Budget */}
-        <div className="min-w-0 py-9 lg:border-r lg:border-rule lg:pr-10">
+        <div className="min-w-0 py-9 lg:border-r lg:border-surface-rule lg:pr-10">
           <p className="text-sm font-semibold text-muted-ink">Total budget</p>
           <p className="font-display tabular wrap-anywhere mt-3 text-[clamp(2.4rem,6vw,5rem)] leading-none text-terracotta-dark">
-            {trip.currency} {Number(trip.budget).toLocaleString()}
+            {formatMoney(Number(trip.budget), trip.currency)}
           </p>
         </div>
 
         {/* Daily Budget */}
-        <div className="min-w-0 border-t border-rule py-9 lg:border-r lg:border-t-0 lg:px-8">
+        <div className="min-w-0 border-t border-surface-rule py-9 lg:border-r lg:border-surface-rule lg:border-t-0 lg:px-8">
           <p className="text-sm font-semibold text-muted-ink">Daily budget</p>
           <p className="tabular wrap-anywhere mt-3 text-2xl font-bold text-ink">
-            {trip.currency} {Number(trip.daily_budget).toLocaleString()}
+            {formatMoney(Number(trip.daily_budget), trip.currency)}
           </p>
           <p className="mt-1 text-xs text-muted-ink">per day average</p>
         </div>
 
         {/* Season & Transport DL */}
-        <div className="min-w-0 border-t border-rule py-9 lg:border-t-0 lg:pl-8">
+        <div className="min-w-0 border-t border-surface-rule py-9 lg:border-t-0 lg:pl-8">
           <dl className="space-y-6">
             <div>
               <dt className="text-sm font-semibold text-muted-ink">Season</dt>
@@ -181,11 +183,17 @@ export function TripDetailView({
         </div>
       </section>
 
+      <section aria-labelledby="places-heading" className="border-b border-surface-rule py-9">
+        <h2 id="places-heading" className="font-display text-3xl text-ink">Places to consider</h2>
+        {trip.recommended_places.length ? <ul className="mt-5 grid gap-3 sm:grid-cols-2">{trip.recommended_places.map((place) => <li key={place} className="rounded-surface border border-surface-rule bg-paper-light px-4 py-3 font-semibold">{place}</li>)}</ul> : <p className="mt-3 text-sm text-muted-ink">No place list was returned, but the rest of your plan is ready.</p>}
+        <p className="mt-5 text-sm text-muted-ink">Your plan combines the trip details you provided with curated travel knowledge when available.</p>
+      </section>
+
       {/* 4. AI Itinerary Narrative */}
       <div className="py-12">
         <section
           aria-labelledby="itinerary-heading"
-          className="min-w-0 border-t border-ink pt-5"
+          className="min-w-0 border-t border-surface-rule pt-5"
         >
           <SubHeadingTag
             id="itinerary-heading"
@@ -206,7 +214,7 @@ export function TripDetailView({
           ) : (
             <div
               role="status"
-              className="mt-7 border-y border-rule bg-indigo-light px-5 py-4 text-indigo"
+              className="mt-7 rounded-surface border-y border-surface-rule bg-indigo-light px-5 py-4 text-indigo"
             >
               <p className="font-semibold">
                 AI itinerary unavailable for this trip.
@@ -216,6 +224,7 @@ export function TripDetailView({
               </p>
             </div>
           )}
+          <TripResultActions trip={trip} />
         </section>
       </div>
     </article>

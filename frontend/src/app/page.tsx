@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { createTrip } from "./actions";
 import { landmarks } from "./landmarks";
 import { TripDetailView } from "../components/TripDetailView";
@@ -14,15 +14,15 @@ import {
 } from "./types";
 
 const inputClass =
-  "mt-2 min-h-12 w-full rounded-[4px] border border-control bg-paper-light px-4 text-base text-ink outline-none transition-colors duration-150 focus-visible:border-indigo focus-visible:outline-indigo disabled:cursor-wait disabled:bg-paper disabled:text-muted-ink";
+  "mt-2 min-h-12 w-full rounded-surface border border-control bg-paper-light px-4 text-base text-ink outline-none transition-colors duration-150 focus-visible:border-terracotta focus-visible:outline-focus-ring disabled:cursor-wait disabled:bg-paper disabled:text-muted-ink";
 
 const sampleFormValues: FormValues = {
-  destination: "Kyoto", country: "Japan", days: "5",
-  budget: "1500", currency: "USD", travel_month: "December",
+  destination: "Yogyakarta", country: "Indonesia", days: "5",
+  budget: "2500", currency: "IDR", travel_month: "December",
 };
 
 function PendingSkeleton() {
-  return <div aria-hidden="true" className="space-y-5 border-y border-rule py-8 motion-safe:animate-pulse motion-reduce:animate-none"><div className="h-8 w-2/3 bg-rule/50" /><div className="h-4 w-full bg-rule/40" /><div className="h-4 w-5/6 bg-rule/40" /><div className="grid gap-4 sm:grid-cols-3"><div className="h-20 bg-rule/40" /><div className="h-20 bg-rule/40" /><div className="h-20 bg-rule/40" /></div></div>;
+  return <div aria-hidden="true" className="space-y-5 border-y border-surface-rule py-8 motion-safe:animate-pulse motion-reduce:animate-none"><div className="h-8 w-2/3 bg-rule/50 rounded-surface" /><div className="h-4 w-full bg-rule/40 rounded-surface" /><div className="h-4 w-5/6 bg-rule/40 rounded-surface" /><div className="grid gap-4 sm:grid-cols-3"><div className="h-20 bg-rule/40 rounded-surface" /><div className="h-20 bg-rule/40 rounded-surface" /><div className="h-20 bg-rule/40 rounded-surface" /></div></div>;
 }
 
 type FieldProps = {
@@ -120,27 +120,50 @@ function CarouselButton({
 
 export default function Home() {
   const [values, setValues] = useState<FormValues>(initialForm);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [slide, setSlide] = useState(0);
   const [isCarouselPaused, setIsCarouselPaused] = useState(false);
+  const [isWaitingCancelled, setIsWaitingCancelled] = useState(false);
+  const [waitStage, setWaitStage] = useState(0);
+  const resultRef = useRef<HTMLDivElement>(null);
+  const stopWaitingRef = useRef<HTMLButtonElement>(null);
+  const wasCancelledRef = useRef(false);
   const [state, formAction, pending] = useActionState<
     ActionState | null,
     FormData
   >(createTrip, null);
 
   useEffect(() => {
-    const current = (document.documentElement.getAttribute("data-theme") as "light" | "dark") || "light";
-    setTheme(current);
-  }, []);
+    if (!pending) {
+      setIsWaitingCancelled(false);
+      setWaitStage(0);
+    }
+  }, [pending]);
 
-  const toggleTheme = () => {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    document.documentElement.setAttribute("data-theme", next);
-    try {
-      localStorage.setItem("kelana_theme", next);
-    } catch {}
-  };
+  useEffect(() => {
+    if (!pending || isWaitingCancelled) return;
+    const timer = window.setInterval(() => setWaitStage((stage) => Math.min(stage + 1, 3)), 6000);
+    return () => window.clearInterval(timer);
+  }, [pending, isWaitingCancelled]);
+
+  useEffect(() => {
+    if (wasCancelledRef.current && !isWaitingCancelled && pending) {
+      stopWaitingRef.current?.focus();
+    }
+    wasCancelledRef.current = isWaitingCancelled;
+  }, [isWaitingCancelled, pending]);
+
+  useEffect(() => {
+    if (state?.ok && !pending) {
+      if (!wasCancelledRef.current) {
+        const prefersReducedMotion =
+          typeof window !== "undefined" &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        resultRef.current?.scrollIntoView(
+          prefersReducedMotion ? undefined : { behavior: "smooth" }
+        );
+      }
+    }
+  }, [state, pending]);
 
   useEffect(() => {
     if (state?.submitted) {
@@ -165,42 +188,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <header className="border-b border-rule bg-paper">
-        <nav className="mx-auto flex max-w-[90rem] items-center justify-between px-5 py-5 sm:px-8" aria-label="Primary">
-          <a href="#top" className="font-display text-2xl text-ink hover:text-terracotta-dark">
-            Kelana<span className="text-terracotta-dark">AI</span>
-          </a>
-          <div className="flex shrink-0 items-center gap-4 sm:gap-7 text-sm font-semibold">
-            <a href="#planner" className="border-b border-terracotta pb-1 text-ink hover:text-terracotta-dark">Plan a trip</a>
-            <Link href="/trips" className="text-muted-ink hover:text-ink transition-colors">My Trips</Link>
-            <a href="#about" className="hidden text-muted-ink hover:text-ink sm:inline">About</a>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-              className="flex items-center gap-1.5 rounded-full border border-rule bg-paper-light px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-control hover:text-terracotta-dark"
-            >
-              {theme === "light" ? (
-                <>
-                  <svg className="h-3.5 w-3.5 text-terracotta" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                  </svg>
-                  <span>Dark</span>
-                </>
-              ) : (
-                <>
-                  <svg className="h-3.5 w-3.5 text-terracotta-dark" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                  </svg>
-                  <span>Light</span>
-                </>
-              )}
-            </button>
-          </div>
-        </nav>
-      </header>
-
-      <main id="top">
+      <main id="main-content">
+        <div id="top" />
         <section
           className="journal-reveal relative isolate mx-auto min-h-[42rem] min-w-0 max-w-[90rem] overflow-hidden px-5 py-12 sm:px-8 sm:py-16 lg:min-h-[48rem] lg:py-24"
           onMouseEnter={() => setIsCarouselPaused(true)}
@@ -275,7 +264,7 @@ export default function Home() {
             <button type="button" disabled={pending} onClick={fillExample} className="mt-6 min-h-12 border-b border-terracotta font-bold text-terracotta-dark disabled:opacity-50">Try an example</button>
           </div>
 
-          <div className="border-t border-ink bg-paper-light px-5 py-7 sm:px-8 sm:py-9">
+          <div className="rounded-surface border border-surface-rule bg-paper-light px-5 py-7 sm:px-8 sm:py-9">
             <form action={formAction} className="space-y-6">
               <div className="grid gap-5 md:grid-cols-2">
                 <Field
@@ -353,23 +342,63 @@ export default function Home() {
 
               <button
                 disabled={pending}
-                className="min-h-12 w-full rounded-[4px] bg-terracotta px-5 font-bold text-white transition-colors duration-150 hover:bg-terracotta-dark focus-visible:outline-indigo disabled:cursor-wait disabled:bg-control disabled:text-white"
+                className="min-h-12 w-full rounded-surface bg-terracotta px-5 font-bold text-white transition-colors duration-150 hover:bg-terracotta-dark focus-visible:outline-focus-ring disabled:cursor-wait disabled:bg-control disabled:text-white"
               >
-                {pending ? "Generating your itinerary..." : "Plan my trip"}
+                {pending
+                  ? isWaitingCancelled
+                    ? "Generating in background…"
+                    : "Generating your itinerary…"
+                  : "Plan my trip"}
               </button>
 
-              {pending && (
+              {pending && !isWaitingCancelled && (
                 <div
-                  className="border-y border-control bg-indigo-light p-4 text-center text-sm font-semibold text-indigo"
+                  className="rounded-surface border border-surface-rule bg-indigo-light p-4 text-center text-sm font-semibold text-indigo space-y-2"
+                  role="status"
                   aria-live="polite"
                 >
-                  Generating your itinerary...
+                  <p>{[
+                    `Reading your ${values.days}-day ${values.destination || "trip"} brief…`,
+                    `Considering ${values.travel_month} season and your ${values.currency} budget…`,
+                    "Checking useful travel knowledge when available…",
+                    "Writing your trip snapshot…",
+                  ][waitStage]}</p>
+                  <p className="text-xs font-normal text-muted-ink">
+                    This may take up to 2 minutes. These stages describe the work, not measured progress.
+                  </p>
+                  <button
+                    ref={stopWaitingRef}
+                    type="button"
+                    onClick={() => setIsWaitingCancelled(true)}
+                    className="mt-2 inline-flex items-center text-xs font-medium text-muted-ink hover:text-ink underline focus-visible:outline-focus-ring"
+                  >
+                    Stop showing progress
+                  </button>
+                </div>
+              )}
+
+              {pending && isWaitingCancelled && (
+                <div
+                  className="rounded-surface border border-surface-rule bg-paper-light p-4 text-center text-sm text-muted-ink space-y-2"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <p className="font-semibold text-ink">Stopped waiting for this response.</p>
+                  <p className="text-xs">If the server request finishes in the background, your itinerary may still be saved under My Trips.</p>
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={() => setIsWaitingCancelled(false)}
+                    className="mt-1 text-xs font-semibold text-terracotta-dark hover:underline focus-visible:outline-focus-ring"
+                  >
+                    Resume waiting
+                  </button>
                 </div>
               )}
 
               {state?.ok === false && (
                 <div
-                  className="border-y border-error bg-paper p-4 text-error"
+                  className="rounded-surface border border-error bg-paper p-4 text-error"
                   role="alert"
                 >
                   <p className="font-bold">{state.message}</p>
@@ -395,16 +424,34 @@ export default function Home() {
           </div>
         </section>
 
-        <section aria-label="Trip output" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8">
+        <section aria-label="Trip output" className="mx-auto max-w-6xl px-5 pb-24 sm:px-8" ref={resultRef}>
           {state?.ok && !pending ? (
-            <TripDetailView
-              trip={state.trip}
-              headingLevel="h2"
-              showBackLink={false}
-            />
+            <div>
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-surface border border-emerald-600/30 bg-emerald-50/80 p-4 text-sm font-semibold text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+              >
+                <div className="flex items-center gap-2">
+                  <span aria-hidden="true" className="text-base font-bold text-emerald-600 dark:text-emerald-400">✓</span>
+                  <span>Itinerary created and saved to My Trips</span>
+                </div>
+                <Link
+                  href="/trips"
+                  className="inline-flex min-h-[44px] items-center text-xs font-bold text-emerald-800 underline transition-colors hover:text-ink dark:text-emerald-300"
+                >
+                  View saved trips →
+                </Link>
+              </div>
+              <TripDetailView
+                trip={state.trip}
+                headingLevel="h2"
+                showBackLink={false}
+              />
+            </div>
           ) : (
             pending ? <PendingSkeleton /> : (
-              <div className="grid gap-8 border-y border-ink py-10 md:grid-cols-[0.35fr_1fr] md:py-14">
+              <div className="grid gap-8 border-y border-surface-rule py-10 md:grid-cols-[0.35fr_1fr] md:py-14">
                 <p className="tabular text-sm font-semibold text-terracotta-dark" aria-hidden="true">02</p>
                 <div>
                 <h2 className="font-display text-3xl leading-tight text-ink sm:text-4xl">

@@ -43,19 +43,18 @@ async function authAction(formData: FormData, authMode: AuthMode): Promise<AuthA
       await clearLocalSession();
       return { ok: false, message: "The authentication service returned an unexpected result.", submittedUsername: username, authMode };
     }
-    if (authMode === "login" && !await persistUpstreamSession(response)) {
+    if (!await persistUpstreamSession(response)) {
       await clearLocalSession();
       return { ok: false, message: "We could not establish a secure session. Please try again.", submittedUsername: username, authMode };
     }
-    if (authMode === "register") await clearLocalSession();
     success = { ok: true, user, submittedUsername: username, authMode };
-    if (authMode === "register") return success;
-  } catch {
-    return { ok: false, message: "We could not reach the authentication service. Try again.", submittedUsername: username, authMode };
+    } catch {
+      await clearLocalSession();
+      return { ok: false, message: "We could not reach the authentication service. Try again.", submittedUsername: username, authMode };
   }
 
   const { redirect } = await import("next/navigation");
-  redirect("/trips");
+  redirect(authMode === "register" ? "/#planner" : "/trips");
   return success!;
 }
 

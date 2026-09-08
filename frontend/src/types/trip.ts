@@ -52,8 +52,10 @@ export const initialForm: FormValues = {
   destination: "",
   country: "",
   days: "5",
-  budget: "1500",
-  currency: "USD",
+  // The deterministic service compares raw numbers without currency conversion.
+  // Keep this modest so the default does not silently become Luxury under that contract.
+  budget: "2500",
+  currency: "IDR",
   travel_month: "December",
 };
 

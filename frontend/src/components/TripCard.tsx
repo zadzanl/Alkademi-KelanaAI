@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { categoryStyle } from "../lib/categoryStyle.ts";
+import { formatMoney } from "../lib/formatMoney.ts";
 import type { TripResponse } from "../types/trip.ts";
 
 type TripCardProps = {
@@ -10,7 +11,7 @@ export function TripCard({ trip }: TripCardProps) {
   const style = categoryStyle(trip.category);
 
   return (
-    <article className="group relative rounded-[4px] border border-rule bg-paper-light p-5 transition-all duration-200 hover:border-ink/40 hover:shadow-md sm:p-6">
+    <article className="group relative rounded-surface border border-surface-rule bg-paper-light p-5 transition-all duration-200 hover:border-control hover:shadow-sm sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-4 min-w-0">
           {/* Circular Category-Tinted Avatar */}
@@ -55,7 +56,7 @@ export function TripCard({ trip }: TripCardProps) {
               <span>{trip.days} days</span>
               <span aria-hidden="true">·</span>
               <span className="font-semibold text-ink">
-                {trip.currency} {Number(trip.budget).toLocaleString()}
+                {formatMoney(Number(trip.budget), trip.currency)}
               </span>
               <span aria-hidden="true">·</span>
               <span>{trip.travel_season}</span>
@@ -86,11 +87,11 @@ export function TripCard({ trip }: TripCardProps) {
       {/* Accessible Hit Area */}
       <Link
         href={`/trips/${trip.id}`}
-        className="absolute inset-0 z-10 rounded-[4px] focus-visible:outline-3 focus-visible:outline-terracotta"
+        className="absolute inset-0 z-10 rounded-surface focus-visible:outline-3 focus-visible:outline-focus-ring"
       >
         <span className="sr-only">
           View details for trip to {trip.destination}, {trip.days} days,{" "}
-          {trip.currency} {Number(trip.budget).toLocaleString()}
+          {formatMoney(Number(trip.budget), trip.currency)}
         </span>
       </Link>
     </article>

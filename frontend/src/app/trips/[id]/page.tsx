@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getTrip } from "../../../services/tripService.ts";
 import { parseTripId } from "../../../lib/safety.ts";
 import { TripDetailView } from "../../../components/TripDetailView.tsx";
+import { formatMoney } from "../../../lib/formatMoney.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export async function generateMetadata({
 
     return {
       title: `${trip.destination}, ${trip.country} (${trip.days} Days) | KelanaAI`,
-      description: `Trip itinerary for ${trip.destination}, ${trip.country}. Budget: ${trip.currency} ${Number(trip.budget).toLocaleString()}. Category: ${trip.category}.`,
+      description: `Trip itinerary for ${trip.destination}, ${trip.country}. Budget: ${formatMoney(Number(trip.budget), trip.currency)}. Category: ${trip.category}.`,
     };
   } catch {
     return { title: "Trip Details | KelanaAI" };
@@ -50,7 +51,7 @@ export default async function TripDetailPage({ params }: TripDetailPageProps) {
 
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <main className="mx-auto max-w-6xl px-5 py-12 sm:px-8">
+      <main id="main-content" className="mx-auto max-w-6xl px-5 py-12 sm:px-8">
         <TripDetailView
           trip={trip}
           headingLevel="h1"

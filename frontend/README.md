@@ -26,7 +26,9 @@ Open <http://localhost:3000>. `API_URL` is server-only; do not rename it to `NEX
 Use `/auth` to register or sign in. Next.js server actions explicitly copy the
 FastAPI `Set-Cookie` session pair into an HttpOnly, SameSite=Lax cookie and
 forward it on later server-side auth requests; the raw token never enters
-action state or rendered markup. This phase does not make trips private.
+action state or rendered markup. Trips and conversations are private: every
+trip CRUD and chat endpoint requires the session cookie and is scoped to the
+signed-in user.
 
 If FastAPI stops, restart `uvicorn backend.main:app --reload`, recheck `/health`, and press **Try again**. Submitted values remain available.
 
@@ -44,19 +46,15 @@ npm run build
 - `/trips` reads the paginated list envelope (`items`, `total`, `page`, `page_size`), shows newest-first results in pages of 10 by default, and keeps the page number in `?page=N`; the API caps `page_size` at 100.
 - `TRIP_REQUEST_TIMEOUT_MS = 120_000` is the inner server-side FastAPI fetch timeout. Its 120,000 ms ceiling is separate from the backend/provider's approximately 15-second ceiling.
 - Non-null AI recommendations render as one provider-agnostic Markdown document. Raw HTML stays disabled and link/image URL schemes are filtered.
-- Instrument Serif is the display face and Source Sans 3 is the body/interface face. The visual system uses warm paper, tinted ink, terracotta, muted indigo, and restrained rules.
-- The current local Borobudur hero is implemented. The approved seven-addition, non-ranked landmark index remains pending per-file provenance, derivative, integration, and browser evidence gates; planning records do not constitute rights clearance.
+- Instrument Serif is the display face and Source Sans 3 is the body/interface face. The visual system uses warm paper, tinted ink, and restrained rules; note the token-name drift — `--terracotta` currently holds teal and `--indigo` holds slate, so treat utility names as labels, not colors. A dark theme with a static night-sky canvas is available via the header toggle.
+- The home page runs an eight-landmark licensed carousel (Borobudur hero plus seven index landmarks, `src/app/landmarks.ts`; per-file provenance in `ATTRIBUTIONS.md`).
+- `/chat` hosts the conversational travel assistant with multi-turn memory; `/trips` and `/trips/[id]` are private to the signed-in user.
 
-No runtime image service, remote image configuration, destination matching, result imagery, image API field, backend change, or package change is part of the approved final revision.
+No runtime image service, remote image configuration, destination matching, result imagery, image API field, backend change, or package change is part of the approved image scope.
 
-## Final-revision implementation handoff
+## Status
 
-As of 2026-08-26, these pre-existing uncommitted files are the incumbent baseline for the approved final revision and must not be discarded or overwritten during tasks 5.2–5.9:
-
-- `src/app/globals.css`
-- `src/app/layout.tsx`
-- `src/app/page.tsx`
-- `public/borobudur-stupa-merapi.webp`
+The 2026-08-26 final-revision handoff completed; subsequent changes (trip history, authentication, pagination, ownership, RAG comparison UI, conversational assistant, shared header, dark mode) landed via the archived OpenSpec changes. See the root `AGENTS.md` and `openspec/changes/archive/` for current truth.
 
 They were intentionally outside Phase 0's documentation-only edits. Task 5.2 owns verification of the Borobudur derivative; task 5.3 owns its manifest/ledger record; task 5.4 owns the bounded page integration while preserving the current global tokens and font setup. Before implementation proceeds, capture these incumbent files in the implementing change or otherwise establish explicit worktree ownership so later edits do not lose them.
 

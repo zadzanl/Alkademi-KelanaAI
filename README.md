@@ -7,22 +7,32 @@ KelanaAI is a travel planning application with an integrated AI assistant, built
 ```text
 kelana-ai/
 ├── backend/
-│   ├── main.py                 # FastAPI app, schemas, and route handlers
+│   ├── main.py                 # FastAPI app, schemas, and route handlers (trips, auth, conversations, knowledge)
 │   ├── database.py             # engine/session lifecycle, init_db()
+│   ├── migrations.py           # create-only, fail-closed manual migration runbooks
 │   ├── models/
-│   │   ├── __init__.py
-│   │   └── trip.py             # Trip mapping (14-column schema)
+│   │   ├── trip.py             # Trip mapping (15-column schema, user-owned)
+│   │   ├── user.py             # User mapping (Argon2id credentials)
+│   │   ├── session.py          # Durable session-token records
+│   │   ├── conversation.py     # Chat conversation mapping
+│   │   ├── message.py          # Chat message mapping
+│   │   └── conversation_message_request.py  # Keyed retry ledger (chat idempotency)
 │   ├── requirements.txt        # Exact API, persistence, and AI dependency pins
 │   └── services/
 │       ├── trip_service.py     # Deterministic trip rules
-│       └── ai_service.py       # Provider-neutral AI recommendation (OpenRouter/Bedrock)
+│       ├── ai_service.py       # Provider-neutral AI recommendation + multi-source RAG (OpenRouter/Bedrock)
+│       └── auth_service.py     # Credential verification and session helpers
 ├── tests/
 │   ├── test_api.py             # TestClient API regressions
+│   ├── test_auth.py            # Auth flow regressions
+│   ├── test_conversation_api.py# Conversation API + retry-ledger regressions
 │   ├── test_trip_service.py    # Service regressions
-│   └── test_ai_service.py      # AI provider selection/parsing unit tests
-└── frontend/                   # Next.js planner UI
-  ├── src/app/actions.ts      # Server Action; FastAPI stays server-to-server
-  └── scripts/focused-checks.ts
+│   ├── test_ai_service.py      # AI provider selection/parsing unit tests
+│   ├── focused-checks.ts       # Frontend focused checks (invoked via npm run check:focused)
+│   └── */                      # Seed + smoke scripts (conversation, pagination, RAG, LLM output)
+└── frontend/                   # Next.js planner UI: / planner, /trips history, /chat assistant, /auth
+  ├── src/app/actions.ts      # Server Actions; FastAPI stays server-to-server
+  └── src/components/         # Shared AppHeader, trip views, chat components
 ```
 
 ## Requirements
@@ -179,11 +189,13 @@ npm run lint
 npm run build
 ```
 
-The implemented interface uses Instrument Serif for display text and Source Sans 3 for body/interface text. Non-null AI recommendations are rendered as provider-agnostic Markdown with raw HTML disabled and link/image URL schemes filtered. The current bundled Borobudur hero image is local; the approved seven-addition static landmark index remains pending its per-file provenance and derivative gates.
+The implemented interface uses Instrument Serif for display text and Source Sans 3 for body/interface text. Non-null AI recommendations are rendered as provider-agnostic Markdown with raw HTML disabled and link/image URL schemes filtered. The home page runs an eight-landmark licensed carousel (Borobudur hero plus seven index landmarks; per-file provenance in `frontend/ATTRIBUTIONS.md`). Note: the CSS token names drifted from the original brand description — `--terracotta` currently holds teal and `--indigo` holds slate; treat the utility names as labels, not colors.
 
 `.agents/skills/impeccable/` and root `skills-lock.json` are intentionally local-only ignored tooling. This diverges from upstream tracking guidance so machine-specific agent skills and lock state are not product source; verify with `git check-ignore -v .agents/skills/impeccable/SKILL.md`.
 
 ## API Examples
+
+All `/api/v1/trips` and `/api/v1/conversations` endpoints require an authenticated session cookie (register via `POST /api/v1/auth/register`, then `POST /api/v1/auth/login`, keeping the returned `kelana_session` cookie). The trip curl examples below omit the cookie for brevity and return HTTP 401 without it.
 
 ### Welcome
 
@@ -305,6 +317,20 @@ After `uvicorn` starts once and create `trips` table, you can verify:
 2. Stop and restart `uvicorn` with the same `.env`.
 3. `GET /api/v1/trips/{id}` with the captured ID. The response is identical to the original, including `created_at`.
 
+## Chat Idempotency Migration and Rollback
+
+The keyed chat retry ledger is opt-in and requires both `CHAT_IDEMPOTENCY_ENABLED=true` on the API and `NEXT_PUBLIC_CHAT_IDEMPOTENCY_ENABLED=true` in the frontend runtime. Deploy the database migration and API first, verify the ledger catalog, then enable the frontend flag. Mixed versions must not advertise keyed retries.
+
+Run the migration with the direct engine connection (not an ORM session):
+
+```bash
+python -c "from backend.database import engine; from backend.migrations import migrate_conversation_message_requests_schema; migrate_conversation_message_requests_schema(engine)"
+```
+
+The migration is create-only and fail-closed: an absent table is created atomically, an exact compatible table is a no-op, and a partial or incompatible table aborts. Verify the catalog before enabling the capability. Existing conversations and messages are not backfilled. Retain completed ledger rows for the documented retention window; cleanup must not delete rows still needed for an advertised retry/replay window.
+
+If rollout fails, disable the frontend flag first, then the API flag, and roll back the migration only after confirming no keyed requests are in flight. Keep the server-side capability marker disabled during rollback. Keyless chat remains the compatibility path.
+
 ## Database Migration & Legacy Backfill (scope-trips-to-users)
 
 The `trips` table now includes a non-null `user_id` foreign key referencing `users(id)` and a composite index on `(user_id, id)`.
@@ -358,7 +384,8 @@ db.close()
 
 - PUT and DELETE are available for trip budgets, but there is no `updated_at` tracking.
 - Schema changes require manual/runbook migrations via `backend/migrations.py` (no Alembic yet); `create_all` is create-only.
-- AI inference is synchronous with a 15-second provider timeout on `POST /api/v1/trips`; the call runs before the trip row is persisted. No retries, runtime failover, or streaming.
+- AI inference is synchronous with a 15-second provider timeout on `POST /api/v1/trips`; the call runs before the trip row is persisted. No retries, runtime failover, or streaming. Multi-source RAG retrieval runs before the LLM call under a strict 3.0-second wall-clock ceiling.
+- Frontend gaps (verified 2026-09-08): the planner defaults to USD with a Kyoto example; money renders with en-US grouping; `recommended_places` is returned by the API but not rendered; the RAG comparison view is implemented but not routed by any page; UI copy is English-only; registration does not auto-login.
 - Authentication is phase-one prototype infrastructure (pseudonymous username/password, Argon2id, database session tokens). There is no rate limiting, password recovery, email verification, account deletion, or data export (not GDPR certified).
 - All trip CRUD operations (`POST`, `GET`, `GET /{id}`, `PUT /{id}`, `DELETE /{id}`) require an active authenticated session cookie (`kelana_session`). Unauthenticated requests return HTTP 401.
 
@@ -369,6 +396,8 @@ Run all regressions from the repository root with the environment activated:
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+As of 2026-09-08 the suite is 104 backend tests and 42 frontend focused checks, all passing.
 
 Run frontend focused checks and build from `frontend/`:
 
@@ -384,6 +413,8 @@ npm run build
 - `v0.2.0` — Holiday season classification.
 - `v0.3.0` — FastAPI REST cut-over committed as `dfafa81` (untagged).
 - `v0.4.0` — PostgreSQL persistence plus ordered reads.
+
+Later milestones (AI recommendations, Next.js frontend, trip history, authentication, pagination, ownership, RAG knowledge base, conversational assistant) are not version-tagged; see `openspec/changes/archive/` for the full change history.
 - `v0.5.0` — AI recommendation column (`ai_recommendation`) via OpenRouter/Bedrock.
 - `v0.6.0` — Phase-one User Authentication (`users` and `sessions` tables).
 - `v0.7.0` — Owner-Scoped Trips (`scope-trips-to-users`: private user history, migration & backfill runbook, cookie forwarding).
