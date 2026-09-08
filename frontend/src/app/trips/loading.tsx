@@ -5,9 +5,10 @@ export default function TripsLoading() {
       aria-busy="true"
       aria-label="Loading trip history"
     >
-      <main className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
+      <main id="main-content" className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
+        <div className="sr-only" role="status" aria-live="polite">Loading trip history…</div>
         {/* Top Action Bar Skeleton */}
-        <div className="mb-8 flex items-center justify-between border-b border-rule pb-4 motion-safe:animate-pulse">
+        <div className="mb-8 flex items-center justify-between border-b border-surface-rule pb-4 motion-safe:animate-pulse">
           <div className="h-4 w-28 rounded bg-rule/50" />
           <div className="h-4 w-32 rounded bg-rule/50" />
         </div>
@@ -29,7 +30,7 @@ export default function TripsLoading() {
           {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className="flex flex-col justify-between gap-4 rounded-[4px] border border-rule bg-paper-light p-5 sm:flex-row sm:items-center sm:p-6"
+              className="flex flex-col justify-between gap-4 rounded-surface border border-surface-rule bg-paper-light p-5 sm:flex-row sm:items-center sm:p-6"
             >
               <div className="flex min-w-0 flex-1 items-start gap-4">
                 <div className="h-12 w-12 shrink-0 rounded-full bg-rule/50" />

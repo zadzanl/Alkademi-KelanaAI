@@ -43,26 +43,26 @@ export default async function TripsPage({ searchParams }: TripsPageProps) {
 
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <main className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
+      <main id="main-content" className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
         {/* Top Action Bar */}
-        <div className="mb-8 flex items-center justify-between border-b border-rule pb-4">
+        <div className="mb-8 flex items-center justify-between border-b border-surface-rule pb-4">
           <div className="flex items-center gap-4">
             <Link
               href="/"
-              className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted-ink transition-colors hover:text-ink focus-visible:outline-terracotta"
+              className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted-ink transition-colors hover:text-ink focus-visible:outline-focus-ring"
             >
               ← Back to Planner
             </Link>
             <Link
               href="/chat"
-              className="inline-flex min-h-[44px] items-center text-sm font-semibold text-terracotta-dark transition-colors hover:underline focus-visible:outline-terracotta"
+              className="inline-flex min-h-[44px] items-center text-sm font-semibold text-terracotta-dark transition-colors hover:underline focus-visible:outline-focus-ring"
             >
               💬 Travel Assistant
             </Link>
           </div>
           <Link
             href="/#planner"
-            className="inline-flex min-h-[44px] items-center text-sm font-bold text-terracotta-dark transition-colors hover:underline focus-visible:outline-terracotta"
+            className="inline-flex min-h-[44px] items-center text-sm font-bold text-terracotta-dark transition-colors hover:underline focus-visible:outline-focus-ring"
           >
             + Plan a New Trip
           </Link>
@@ -75,7 +75,7 @@ export default async function TripsPage({ searchParams }: TripsPageProps) {
               My Trips
             </h1>
             {!isUnauthorized && (
-              <span className="rounded-full border border-rule bg-paper-light px-3 py-1 text-xs font-semibold tabular text-muted-ink">
+              <span className="rounded-full border border-surface-rule bg-paper-light px-3 py-1 text-xs font-semibold tabular text-muted-ink">
                 {total} {total === 1 ? "saved itinerary" : "saved itineraries"}
               </span>
             )}

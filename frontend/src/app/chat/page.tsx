@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createConversationAction, getConversationMessagesAction, listConversationsAction, renameConversationAction, sendConversationMessageAction, sendConversationMessageWithKeyAction } from "../actions.ts";
 import type { ChatActionResult, Conversation, Message } from "../../types/chat.ts";
@@ -17,18 +16,27 @@ const EMPTY_MESSAGES: ConversationMessages = { server: [], local: [] };
 export default function ChatPage() {
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messagesByConversation, setMessagesByConversation] = useState<Record<number, ConversationMessages>>({});
   const [composerContent, setComposerContent] = useState("");
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [, startTransition] = useTransition();
   const activeConversationRef = useRef<number | null>(null);
   const activeGenerationRef = useRef(0);
   const historyGenerationRef = useRef<Record<number, number>>({});
   const sendGuardRef = useRef(false);
+  const historyToggleRef = useRef<HTMLButtonElement>(null);
   const localSequenceRef = useRef(0);
+
+  useEffect(() => {
+    const prefill = new URLSearchParams(window.location.search).get("prefill");
+    if (prefill) setComposerContent(prefill);
+  }, []);
 
   const redirectIfUnauthorized = useCallback((result: ChatActionResult<unknown>): boolean => {
     if (!result.ok && (result.kind === "unauthorized" || result.status === 401)) {
@@ -43,6 +51,18 @@ export default function ChatPage() {
     activeConversationRef.current = id;
     setActiveConversationId(id);
   }, []);
+
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    requestAnimationFrame(() => historyToggleRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") closeHistory(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [historyOpen, closeHistory]);
 
   const refreshConversations = useCallback(async () => {
     const result = await listConversationsAction();
@@ -64,7 +84,7 @@ export default function ChatPage() {
     if (!result.ok) return false;
     setMessagesByConversation((previous) => {
       const current = previous[conversationId] ?? EMPTY_MESSAGES;
-      return { ...previous, [conversationId]: { server: result.data, local: resolvedLocalId ? current.local.filter((item) => item.localId !== resolvedLocalId) : current.local } };
+      return { ...previous, [conversationId]: { ...previous[conversationId], server: result.data, local: resolvedLocalId ? current.local.filter((item) => item.localId !== resolvedLocalId) : current.local } };
     });
     return true;
   }, [redirectIfUnauthorized]);
@@ -81,10 +101,12 @@ export default function ChatPage() {
       const result = await listConversationsAction();
       if (!mounted || redirectIfUnauthorized(result)) return;
       if (!result.ok) {
+        setIsLoadingHistory(false);
         setNotice({ message: result.error, action: () => void refreshConversations(), actionLabel: "Try again" });
         return;
       }
       setConversations(result.data);
+      setIsLoadingHistory(false);
       if (result.data.length > 0) selectConversation(result.data[0].id);
     });
     return () => { mounted = false; };
@@ -107,6 +129,7 @@ export default function ChatPage() {
   const handleNewChat = () => {
     if (sendGuardRef.current) return;
     sendGuardRef.current = true;
+    setIsCreatingChat(true);
     startTransition(async () => {
       try {
         const result = await createConversationAction();
@@ -118,8 +141,10 @@ export default function ChatPage() {
         const conversation = { id: result.data.conversation_id, title: result.data.title, created_at: result.data.created_at };
         setConversations((previous) => [conversation, ...previous.filter((item) => item.id !== conversation.id)]);
         selectConversation(conversation.id);
+        closeHistory();
       } finally {
         sendGuardRef.current = false;
+        setIsCreatingChat(false);
       }
     });
   };
@@ -230,20 +255,58 @@ export default function ChatPage() {
   const visibleMessages = [...activeMessages.server, ...activeMessages.local].sort((left, right) => left.created_at.localeCompare(right.created_at));
 
   return (
-    <div className="flex flex-col h-[calc(100vh-45px)] bg-paper text-ink">
-      <header className="border-b border-rule bg-paper px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="font-display text-xl text-ink hover:text-terracotta-dark">Kelana<span className="text-terracotta-dark">AI</span></Link>
-          <span className="text-muted-ink text-sm hidden sm:inline">|</span><span className="text-sm font-semibold text-ink/80 hidden sm:inline">Travel Assistant</span>
-        </div>
-        <div className="flex items-center gap-4 text-sm font-medium"><Link href="/" className="text-muted-ink hover:text-ink transition-colors">Planner</Link><Link href="/trips" className="text-muted-ink hover:text-ink transition-colors">My Trips</Link><span className="text-terracotta font-semibold border-b border-terracotta pb-0.5">Assistant</span></div>
-      </header>
+    <div className="flex flex-col h-dvh bg-paper text-ink">
       <div className="flex-1 flex overflow-hidden">
-        <ChatSidebar conversations={conversations} activeConversationId={activeConversationId} onSelectConversation={selectConversation} onNewChat={handleNewChat} onRenameConversation={handleRenameConversation} />
-        <main className="flex-1 flex flex-col bg-paper-light relative">
-          <div className="px-6 py-3 border-b border-rule bg-paper-surface flex items-center justify-between shadow-2xs"><h1 className="font-display text-lg text-ink font-semibold truncate">{activeConversation ? activeConversation.title : "New Conversation"}</h1><span className="text-xs text-ink/40 font-mono">{visibleMessages.length} {visibleMessages.length === 1 ? "turn" : "turns"}</span></div>
-          {notice && <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700 flex justify-between items-center gap-3"><span>{notice.message}</span><div className="flex items-center gap-3 shrink-0">{notice.action && <button type="button" onClick={notice.action} className="font-semibold hover:underline">{notice.actionLabel}</button>}<button type="button" onClick={() => setNotice(null)} className="text-red-900 font-bold hover:underline">✕</button></div></div>}
-          {isLoadingMessages ? <div className="flex-1 flex items-center justify-center text-ink/50 text-sm italic">Loading conversation history...</div> : <ChatMessageList messages={visibleMessages} isLoading={isSending} onRecoverMessage={handleRecoverMessage} />}
+        {historyOpen && <button type="button" aria-label="Close conversation history" onClick={closeHistory} className="fixed inset-0 z-30 bg-ink/30 md:hidden" />}
+        <ChatSidebar
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onSelectConversation={selectConversation}
+          onNewChat={handleNewChat}
+          onRenameConversation={handleRenameConversation}
+          mobileOpen={historyOpen}
+          onClose={closeHistory}
+          isLoadingHistory={isLoadingHistory}
+          isCreatingChat={isCreatingChat}
+        />
+        <main id="main-content" className="flex-1 flex flex-col bg-paper-light relative">
+          <div className="px-6 py-3 border-b border-surface-rule bg-paper-surface flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                ref={historyToggleRef}
+                type="button"
+                aria-label="Open conversation history"
+                aria-expanded={historyOpen}
+                onClick={() => setHistoryOpen(true)}
+                className="md:hidden px-2 py-2 text-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring rounded-surface"
+              >
+                ☰
+              </button>
+              <h1 className="font-display text-lg text-ink font-semibold truncate">{activeConversation ? activeConversation.title : "New Conversation"}</h1>
+            </div>
+            <span className="shrink-0 text-xs text-ink/40 font-mono">{visibleMessages.length} {visibleMessages.length === 1 ? "turn" : "turns"}</span>
+          </div>
+          {notice && (
+            <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700 flex justify-between items-center gap-3 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900">
+              <span>{notice.message}</span>
+              <div className="flex items-center gap-3 shrink-0">
+                {notice.action && <button type="button" onClick={notice.action} className="font-semibold hover:underline focus-visible:outline-focus-ring">{notice.actionLabel}</button>}
+                <button type="button" onClick={() => setNotice(null)} className="text-red-900 dark:text-red-200 font-bold hover:underline focus-visible:outline-focus-ring">✕</button>
+              </div>
+            </div>
+          )}
+          {isLoadingMessages ? (
+            <div role="status" aria-live="polite" className="flex-1 flex items-center justify-center text-ink/50 text-sm italic">
+              Loading conversation history…
+            </div>
+          ) : (
+            <ChatMessageList
+              messages={visibleMessages}
+              isLoading={isSending}
+              onRecoverMessage={handleRecoverMessage}
+              onSelectSuggestion={handleSendMessage}
+            />
+          )}
           <ChatInput content={composerContent} onContentChange={setComposerContent} onSendMessage={handleSendMessage} disabled={isSending} />
         </main>
       </div>

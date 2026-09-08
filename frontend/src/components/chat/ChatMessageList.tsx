@@ -6,17 +6,29 @@ import type { LocalUserMessage } from "../../lib/chatState.ts";
 import { ChatMessageItem } from "./ChatMessageItem.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 
+const suggestions = [
+  "Plan a 4-day trip to Yogyakarta",
+  "What to pack for Mount Bromo?",
+  "Best budget street food in Bandung",
+];
+
 interface ChatMessageListProps {
   messages: Array<Message | LocalUserMessage>;
   isLoading?: boolean;
   onRecoverMessage?: (message: LocalUserMessage) => void;
+  onSelectSuggestion?: (content: string) => void;
 }
 
-export function ChatMessageList({ messages, isLoading, onRecoverMessage }: ChatMessageListProps) {
+export function ChatMessageList({ messages, isLoading, onRecoverMessage, onSelectSuggestion }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = listRef.current;
+    const nearBottom = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 160;
+    if (!nearBottom) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) bottomRef.current?.scrollIntoView();
+    else bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
   if (messages.length === 0 && !isLoading) {
@@ -28,9 +40,17 @@ export function ChatMessageList({ messages, isLoading, onRecoverMessage }: ChatM
             I can help you build custom itineraries, answer questions about destinations, suggest transport routes, and recommend authentic local experiences.
           </p>
           <div className="flex flex-wrap justify-center gap-2 text-xs">
-            <span className="px-2.5 py-1 bg-ink/5 rounded-full border border-rule">&ldquo;Plan a 4-day trip to Yogyakarta&rdquo;</span>
-            <span className="px-2.5 py-1 bg-ink/5 rounded-full border border-rule">&ldquo;What to pack for Mount Bromo?&rdquo;</span>
-            <span className="px-2.5 py-1 bg-ink/5 rounded-full border border-rule">&ldquo;Best budget street food in Bandung&rdquo;</span>
+            {suggestions.map((text) => (
+              <button
+                key={text}
+                type="button"
+                disabled={isLoading}
+                onClick={() => onSelectSuggestion?.(text)}
+                className="px-2.5 py-1 bg-ink/5 hover:bg-ink/10 text-ink rounded-full border border-surface-rule transition-colors cursor-pointer text-xs focus-visible:outline-focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                &ldquo;{text}&rdquo;
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -38,7 +58,7 @@ export function ChatMessageList({ messages, isLoading, onRecoverMessage }: ChatM
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+    <div ref={listRef} role="log" aria-label="Conversation messages" aria-live="off" className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
       <div className="max-w-4xl mx-auto">
         {messages.map((message) => (
           <ChatMessageItem
@@ -48,7 +68,7 @@ export function ChatMessageList({ messages, isLoading, onRecoverMessage }: ChatM
           />
         ))}
         {isLoading && (
-          <div className="mb-4">
+          <div className="mb-4" role="status" aria-label="Assistant is thinking">
             <TypingIndicator />
           </div>
         )}

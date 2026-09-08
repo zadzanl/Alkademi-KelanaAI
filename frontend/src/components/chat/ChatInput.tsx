@@ -32,9 +32,10 @@ export function ChatInput({ onSendMessage, content, onContentChange, disabled }:
   };
 
   return (
-    <div className="border-t border-stone-200 bg-paper-surface p-4">
-      <div className="max-w-4xl mx-auto flex items-end gap-2 bg-paper-surface border border-rule rounded-[6px] p-2 focus-within:border-terracotta transition-colors shadow-xs">
+    <div className="border-t border-surface-rule bg-paper-surface p-4">
+      <div className="max-w-4xl mx-auto flex items-end gap-2 bg-paper-surface border border-surface-rule rounded-surface p-2 focus-within:border-terracotta transition-colors shadow-xs">
         <textarea
+          aria-label="Message to KelanaAI travel assistant"
           ref={textareaRef}
           value={content}
           onChange={handleInput}
@@ -48,9 +49,10 @@ export function ChatInput({ onSendMessage, content, onContentChange, disabled }:
           type="button"
           onClick={handleSubmit}
           disabled={disabled || !content.trim()}
-          className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-white bg-terracotta hover:bg-terracotta-dark disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] transition-colors"
+          aria-busy={disabled}
+          className="inline-flex items-center justify-center px-4 py-2 text-xs font-semibold text-white bg-terracotta hover:bg-terracotta-dark disabled:opacity-40 disabled:cursor-wait rounded-surface transition-colors focus-visible:outline-focus-ring"
         >
-          Send
+          {disabled ? "Sending…" : "Send"}
         </button>
       </div>
     </div>

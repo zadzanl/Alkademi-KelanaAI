@@ -24,16 +24,16 @@ export function Pagination({ page, total, pageSize }: PaginationProps) {
     .sort((a, b) => a - b);
 
   const linkClass =
-    "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[4px] border border-rule bg-paper-light px-3 text-sm font-semibold text-muted-ink transition-colors hover:border-terracotta hover:text-ink focus-visible:outline-terracotta";
+    "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-surface border border-surface-rule bg-paper-light px-3 text-sm font-semibold text-muted-ink transition-colors hover:border-terracotta hover:text-ink focus-visible:outline-focus-ring";
   const currentClass =
-    "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[4px] border border-terracotta bg-terracotta px-3 text-sm font-bold text-white";
+    "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-surface border border-terracotta bg-terracotta px-3 text-sm font-bold text-white focus-visible:outline-focus-ring";
   const disabledClass =
-    "inline-flex min-h-[44px] items-center justify-center rounded-[4px] border border-rule px-4 text-sm font-semibold text-control opacity-60";
+    "inline-flex min-h-[44px] items-center justify-center rounded-surface border border-surface-rule px-4 text-sm font-semibold text-control opacity-60";
 
   return (
     <nav
       aria-label="Pagination"
-      className="mt-8 flex flex-wrap items-center justify-center gap-2 border-t border-rule pt-6"
+      className="mt-8 flex flex-wrap items-center justify-center gap-2 border-t border-surface-rule pt-6"
     >
       {page === 1 ? (
         <span className={disabledClass} aria-disabled="true">

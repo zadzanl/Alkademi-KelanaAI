@@ -18,7 +18,7 @@ export function EmptyState({
   const HeadingTag = headingLevel;
 
   return (
-    <div className="journal-reveal rounded-[4px] border-2 border-dashed border-rule bg-paper-light/60 px-6 py-16 text-center sm:px-12 sm:py-20">
+    <div className="journal-reveal rounded-surface border-2 border-dashed border-surface-rule bg-paper-light/60 px-6 py-16 text-center sm:px-12 sm:py-20">
       <div
         className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-terracotta/10 text-terracotta-dark dark:bg-terracotta/20"
         aria-hidden="true"
@@ -49,7 +49,7 @@ export function EmptyState({
       <div className="mt-8 flex justify-center">
         <Link
           href={actionHref}
-          className="inline-flex min-h-12 items-center justify-center rounded-[4px] bg-terracotta px-6 py-3 text-base font-bold text-white transition-colors duration-150 hover:bg-terracotta-dark focus-visible:outline-terracotta"
+          className="inline-flex min-h-12 items-center justify-center rounded-surface bg-terracotta px-6 py-3 text-base font-bold text-white transition-colors duration-150 hover:bg-terracotta-dark focus-visible:outline-focus-ring"
         >
           {actionText}
           <span className="ml-2" aria-hidden="true">

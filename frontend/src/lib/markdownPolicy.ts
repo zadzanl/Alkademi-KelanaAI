@@ -59,7 +59,7 @@ export function markdownComponents(HeadingTag: ElementType): Components {
             src: safe,
             alt: alt ?? "",
             loading: "lazy",
-            className: "rounded-[4px]",
+            className: "rounded-surface",
           })
         : null;
     },

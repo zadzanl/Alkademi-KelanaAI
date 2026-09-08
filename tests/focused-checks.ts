@@ -740,4 +740,183 @@ test("chat composer and rename remain parent-controlled until acceptance", () =>
 	assert.match(sidebarSource, /setRenameError\(result\.error/);
 });
 
+test("header consistency enforces single root header, skip-link, and navigation semantics", () => {
+	const headerSource = readFileSync(new URL("../frontend/src/components/AppHeader.tsx", import.meta.url), "utf8");
+	const layoutSource = readFileSync(new URL("../frontend/src/app/layout.tsx", import.meta.url), "utf8");
+	const pageSource = readFileSync(new URL("../frontend/src/app/page.tsx", import.meta.url), "utf8");
+
+	// Root layout owns the application header
+	assert.match(layoutSource, /<AppHeader/);
+
+	// Page does not render a duplicate application header
+	assert.doesNotMatch(pageSource, /<header className="border-b/);
+	assert.match(pageSource, /<main id="main-content">/);
+
+	// AppHeader contains skip link to main-content and primary nav semantics
+	assert.match(headerSource, /href="#main-content"/);
+	assert.match(headerSource, /className="skip-link"/);
+	assert.match(headerSource, /aria-label="Primary"/);
+	assert.match(headerSource, /aria-current=\{active \? "page" : undefined\}/);
+	assert.match(headerSource, /href: "\/", label: "Planner"/);
+	assert.match(headerSource, /href: "\/trips", label: "My Trips"/);
+	assert.match(headerSource, /href: "\/chat", label: "Assistant"/);
+});
+
+test("chat history loading state is visually and semantically distinct from true empty state", () => {
+	const sidebarSource = readFileSync(new URL("../frontend/src/components/chat/ChatSidebar.tsx", import.meta.url), "utf8");
+
+	// Loading state is separated from empty state with distinct role and copy
+	assert.match(sidebarSource, /isLoadingHistory \?/);
+	assert.match(sidebarSource, /role="status">Loading conversations…<\/div>/);
+	assert.match(sidebarSource, /: conversations\.length === 0 \?/);
+	assert.match(sidebarSource, /No conversations yet\. Start a new chat!/);
+
+	// New chat action supports restrained pending feedback
+	assert.match(sidebarSource, /isCreatingChat/);
+	assert.match(sidebarSource, /disabled=\{isCreatingChat\}/);
+	assert.match(sidebarSource, /aria-busy=\{isCreatingChat\}/);
+	assert.match(sidebarSource, /isCreatingChat \? "Creating…" : "\+ New Chat"/);
+
+	// Rename action supports restrained pending feedback and status announcement
+	assert.match(sidebarSource, /isSavingRename/);
+	assert.match(sidebarSource, /disabled=\{isSavingRename\}/);
+	assert.match(sidebarSource, /isSavingRename \? "…" : "✓"/);
+	assert.match(sidebarSource, /role="status">Saving conversation title…<\/span>/);
+});
+
+test("reduced motion styles dampen all animations and transitions", () => {
+	const cssSource = readFileSync(new URL("../frontend/src/app/globals.css", import.meta.url), "utf8");
+
+	assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)/);
+	assert.match(cssSource, /transition-duration:\s*0\.01ms !important/);
+	assert.match(cssSource, /animation-duration:\s*0\.01ms !important/);
+	assert.match(cssSource, /animation-iteration-count:\s*1 !important/);
+});
+
+test("softened boundary tokens provide semantic surface-rule, radius, and focus rings", () => {
+	const cssSource = readFileSync(new URL("../frontend/src/app/globals.css", import.meta.url), "utf8");
+
+	// Light and dark root definitions
+	assert.match(cssSource, /--surface-rule:\s*color-mix\(in srgb, var\(--rule\) 55%, transparent\);/);
+	assert.match(cssSource, /--surface-radius:\s*0\.5rem;/);
+	assert.match(cssSource, /--focus-ring:\s*var\(--terracotta\);/);
+	assert.match(cssSource, /--focus-ring:\s*var\(--terracotta-dark\);/);
+
+	// Theme inline mappings
+	assert.match(cssSource, /--color-surface-rule:\s*var\(--surface-rule\);/);
+	assert.match(cssSource, /--color-focus-ring:\s*var\(--focus-ring\);/);
+	assert.match(cssSource, /--radius-surface:\s*var\(--surface-radius\);/);
+
+	// Global focus visible uses focus-ring token
+	assert.match(cssSource, /:focus-visible\s*\{\s*outline:\s*3px solid var\(--focus-ring\);/);
+});
+
+test("operation-specific pending feedback is present across planner, auth, rag, and chat", () => {
+	const plannerSource = readFileSync(new URL("../frontend/src/app/page.tsx", import.meta.url), "utf8");
+	const authSource = readFileSync(new URL("../frontend/src/app/auth/page.tsx", import.meta.url), "utf8");
+	const ragSource = readFileSync(new URL("../frontend/src/components/RagComparisonView.tsx", import.meta.url), "utf8");
+	const chatInputSource = readFileSync(new URL("../frontend/src/components/chat/ChatInput.tsx", import.meta.url), "utf8");
+
+	// Planner generation expected duration copy and stop-waiting cancel action
+	assert.match(plannerSource, /These stages describe the work, not measured progress/);
+	assert.match(plannerSource, /Stop showing progress/);
+	assert.match(plannerSource, /Itinerary created and saved to My Trips/);
+
+	// Auth submit operation-specific copy
+	assert.match(authSource, /Signing in…/);
+	assert.match(authSource, /Creating account…/);
+
+	// RAG comparison operation-specific copy
+	assert.match(ragSource, /Comparing base model and knowledge-enhanced recommendations/);
+	assert.match(ragSource, /may take up to 60 seconds/);
+
+	// Chat message sending state
+	assert.match(chatInputSource, /disabled \? "Sending…" : "Send"/);
+});
+
+test("header disclosure states, escape dismiss, and universal theme toggle remain accessible", () => {
+	const headerSource = readFileSync(new URL("../frontend/src/components/AppHeader.tsx", import.meta.url), "utf8");
+
+	// Mobile nav and user profile disclosure states are separated
+	assert.match(headerSource, /const \[navOpen, setNavOpen\] = useState/);
+	assert.match(headerSource, /const \[profileOpen, setProfileOpen\] = useState/);
+	assert.match(headerSource, /aria-expanded=\{navOpen\}/);
+	assert.match(headerSource, /aria-expanded=\{profileOpen\}/);
+
+	// Escape key dismisses open menus
+	assert.match(headerSource, /event\.key === "Escape"/);
+	assert.match(headerSource, /setNavOpen\(false\)/);
+	assert.match(headerSource, /setProfileOpen\(false\)/);
+
+	// Theme toggle is universally available in header navigation
+	assert.match(headerSource, /className="app-header__theme-btn"/);
+	assert.match(headerSource, /onClick=\{toggleTheme\}/);
+	assert.match(headerSource, /Switch to dark mode/);
+});
+
+test("system accessibility standards enforce high contrast forced-colors, reduced motion scroll, and token consistency", () => {
+	const cssSource = readFileSync(new URL("../frontend/src/app/globals.css", import.meta.url), "utf8");
+	const pageSource = readFileSync(new URL("../frontend/src/app/page.tsx", import.meta.url), "utf8");
+	const chatListSource = readFileSync(new URL("../frontend/src/components/chat/ChatMessageList.tsx", import.meta.url), "utf8");
+	const tripsSource = readFileSync(new URL("../frontend/src/app/trips/page.tsx", import.meta.url), "utf8");
+	const emptyStateSource = readFileSync(new URL("../frontend/src/components/EmptyState.tsx", import.meta.url), "utf8");
+	const paginationSource = readFileSync(new URL("../frontend/src/components/Pagination.tsx", import.meta.url), "utf8");
+
+	// High contrast forced colors mode uses system Highlight outline
+	assert.match(cssSource, /@media \(forced-colors: active\)/);
+	assert.match(cssSource, /outline:\s*3px solid Highlight !important/);
+
+	// Planner scrollIntoView respects prefers-reduced-motion
+	assert.match(pageSource, /prefers-reduced-motion/);
+
+	// Chat suggestion chips prevent rapid multi-clicks while loading
+	assert.match(chatListSource, /disabled=\{isLoading\}/);
+
+	// Trips, EmptyState, and Pagination use semantic softened tokens
+	assert.match(tripsSource, /border-surface-rule/);
+	assert.match(tripsSource, /focus-visible:outline-focus-ring/);
+	assert.doesNotMatch(tripsSource, /outline-terracotta/);
+
+	assert.match(emptyStateSource, /rounded-surface/);
+	assert.match(emptyStateSource, /border-surface-rule/);
+	assert.match(emptyStateSource, /focus-visible:outline-focus-ring/);
+
+	assert.match(paginationSource, /rounded-surface/);
+	assert.match(paginationSource, /border-surface-rule/);
+	assert.match(paginationSource, /focus-visible:outline-focus-ring/);
+});
+
+test("advanced disclosure focus restoration, mobile accordion, and form overflow robustness", () => {
+	const headerSource = readFileSync(new URL("../frontend/src/components/AppHeader.tsx", import.meta.url), "utf8");
+	const cssSource = readFileSync(new URL("../frontend/src/app/globals.css", import.meta.url), "utf8");
+	const plannerSource = readFileSync(new URL("../frontend/src/app/page.tsx", import.meta.url), "utf8");
+	const sidebarSource = readFileSync(new URL("../frontend/src/components/chat/ChatSidebar.tsx", import.meta.url), "utf8");
+	const paginationSource = readFileSync(new URL("../frontend/src/components/Pagination.tsx", import.meta.url), "utf8");
+
+	// Header restores focus to triggers on Escape and closes on outside click
+	assert.match(headerSource, /profileTriggerRef\.current\?\.focus\(\)/);
+	assert.match(headerSource, /menuButtonRef\.current\?\.focus\(\)/);
+	assert.match(headerSource, /handleClickOutside/);
+	assert.match(headerSource, /isTouchRef/);
+
+	// Profile popover relies on explicit open state without trapping via focus-within
+	assert.match(cssSource, /\.profile-menu__popover--open\s*\{\s*display:\s*block;\s*\}/);
+	assert.doesNotMatch(cssSource, /\.profile-menu:focus-within\s*\.profile-menu__popover/);
+
+	// Mobile nav formats profile popover as an accordion
+	assert.match(cssSource, /\.profile-menu__popover\s*\{\s*position:\s*static;\s*width:\s*100%;/);
+
+	// Planner provides bidirectional focus retention when toggling wait state
+	assert.match(plannerSource, /stopWaitingRef\.current\?\.focus\(\)/);
+	assert.match(plannerSource, /wasCancelledRef/);
+	assert.match(plannerSource, /ref=\{stopWaitingRef\}/);
+
+	// Chat rename supports Escape cancellation and min-w-0 container safety
+	assert.match(sidebarSource, /e\.key === "Escape"/);
+	assert.match(sidebarSource, /setEditingId\(null\)/);
+	assert.match(sidebarSource, /className="flex flex-wrap items-center gap-1 flex-1 min-w-0"/);
+
+	// Pagination current page has visible focus ring
+	assert.match(paginationSource, /currentClass =[\s\S]*focus-visible:outline-focus-ring/);
+});
 

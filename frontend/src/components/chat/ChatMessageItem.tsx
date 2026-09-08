@@ -21,10 +21,10 @@ export function ChatMessageItem({ message, onRecover }: ChatMessageItemProps) {
   return (
     <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} mb-4`}>
       <div
-        className={`max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-[6px] text-sm leading-relaxed border ${
+        className={`max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-surface text-sm leading-relaxed border ${
           isUser
             ? "bg-terracotta/10 border-terracotta/30 text-ink"
-            : "bg-paper-surface border-rule text-ink shadow-xs"
+            : "bg-paper-surface border-surface-rule text-ink shadow-xs"
         }`}
       >
         {isUser ? (
@@ -48,7 +48,7 @@ export function ChatMessageItem({ message, onRecover }: ChatMessageItemProps) {
             <button
               type="button"
               onClick={() => onRecover(message)}
-              className="ml-2 font-semibold text-terracotta-dark hover:underline"
+              className="ml-2 font-semibold text-terracotta-dark hover:underline focus-visible:outline-focus-ring"
             >
               {message.recovery === "retry" ? "Retry" : message.recovery === "check" ? "Check again" : "Refresh"}
             </button>

@@ -3,8 +3,8 @@ import Link from "next/link";
 export default function TripNotFound() {
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <main className="mx-auto max-w-2xl px-5 py-20 text-center sm:px-8">
-        <div className="rounded-[4px] border border-rule bg-paper-light p-8 sm:p-12">
+      <main id="main-content" className="mx-auto max-w-2xl px-5 py-20 text-center sm:px-8">
+        <div className="rounded-surface border border-surface-rule bg-paper-light p-8 sm:p-12">
           <p className="tabular text-xs font-bold uppercase tracking-wider text-terracotta-dark">
             404 — Not Found
           </p>
@@ -18,13 +18,13 @@ export default function TripNotFound() {
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <Link
               href="/trips"
-              className="inline-flex min-h-11 items-center justify-center rounded-[4px] bg-terracotta px-6 text-sm font-bold text-white transition-colors hover:bg-terracotta-dark focus-visible:outline-indigo"
+              className="inline-flex min-h-11 items-center justify-center rounded-surface bg-terracotta px-6 text-sm font-bold text-white transition-colors hover:bg-terracotta-dark focus-visible:outline-focus-ring"
             >
               ← View All Saved Trips
             </Link>
             <Link
               href="/"
-              className="inline-flex min-h-11 items-center justify-center rounded-[4px] border border-rule bg-paper px-6 text-sm font-bold text-ink transition-colors hover:border-control focus-visible:outline-indigo"
+              className="inline-flex min-h-11 items-center justify-center rounded-surface border border-surface-rule bg-paper px-6 text-sm font-bold text-ink transition-colors hover:border-control focus-visible:outline-focus-ring"
             >
               Plan a New Trip
             </Link>

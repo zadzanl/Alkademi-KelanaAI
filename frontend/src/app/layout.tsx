@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Instrument_Serif, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
-import { AuthHeader } from "../components/AuthHeader";
+import { AppHeader } from "../components/AppHeader";
+import { getCurrentUser } from "../services/authService";
 
 const instrumentSerif = Instrument_Serif({
   weight: "400",
@@ -22,11 +23,12 @@ export const metadata: Metadata = {
   description: "Build a grounded trip snapshot with KelanaAI.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+    const user = await getCurrentUser();
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -39,7 +41,7 @@ export default function RootLayout({
       <body
         className={`${instrumentSerif.variable} ${sourceSans.variable} antialiased`}
       >
-        <div className="border-b border-rule bg-paper px-5 py-2 text-right sm:px-8"><AuthHeader /></div>
+        <AppHeader username={user?.username} />
         {children}
       </body>
     </html>
