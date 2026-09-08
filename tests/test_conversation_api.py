@@ -401,9 +401,166 @@ class ConversationApiTests(unittest.TestCase):
             ledger = db.query(ConversationMessageRequest).one()
             self.assertEqual(ledger.status, "processing")
             self.assertIsNotNone(ledger.claim_token)
+            self.assertLessEqual(ledger.lease_expires_at, datetime.now(timezone.utc))
             self.assertEqual(db.query(Message).filter(Message.conversation_id == conv_id).count(), 1)
         finally:
             db.close()
+
+    def _new_keyed_conversation(self, username):
+        cookie = self._register_user(username)
+        self.client.cookies.set(AUTH_COOKIE_NAME, cookie)
+        conversation_id = self.client.post("/api/v1/conversations", json={}).json()["conversation_id"]
+        return conversation_id, str(uuid4())
+
+    def _assert_keyed_rows(self, conversation_id, *, status, messages):
+        db = SessionLocal()
+        try:
+            ledger = db.query(ConversationMessageRequest).one()
+            self.assertEqual(ledger.status, status)
+            self.assertEqual(db.query(Message).filter(Message.conversation_id == conversation_id).count(), messages)
+            if status == "processing":
+                self.assertIsNotNone(ledger.claim_token)
+                self.assertLessEqual(ledger.lease_expires_at, datetime.now(timezone.utc))
+            return ledger.id, ledger.claim_token, ledger.assistant_message_id
+        finally:
+            db.close()
+
+    @patch("backend.main.generate_chat_response", return_value="must not run")
+    def test_keyed_history_failure_expires_only_matching_claim(self, provider):
+        conversation_id, key = self._new_keyed_conversation("history_failure")
+        with patch("backend.main._load_keyed_history", side_effect=RuntimeError("history failed")):
+            result = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "history seam"})
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(result.json()["detail"]["code"], "chat_generation_unavailable")
+        provider.assert_not_called()
+        self._assert_keyed_rows(conversation_id, status="processing", messages=1)
+
+    @patch("backend.main.generate_chat_response", return_value="unused")
+    def test_keyed_reservation_flush_failure_creates_no_rows(self, provider):
+        conversation_id, key = self._new_keyed_conversation("reservation_flush_failure")
+        def fail_flush(_session, *args, **kwargs):
+            raise RuntimeError("reservation flush failed")
+
+        with patch("backend.main.Session.flush", new=fail_flush):
+            result = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "flush reservation"})
+        self.assertEqual(result.status_code, 503)
+        provider.assert_not_called()
+        db = SessionLocal()
+        try:
+            self.assertEqual(db.query(ConversationMessageRequest).count(), 0)
+            self.assertEqual(db.query(Message).filter(Message.conversation_id == conversation_id).count(), 0)
+        finally:
+            db.close()
+
+    @patch("backend.main.generate_chat_response", return_value="reply")
+    def test_keyed_assistant_flush_failure_is_recoverable(self, provider):
+        conversation_id, key = self._new_keyed_conversation("flush_failure")
+        with patch("backend.main._finalize_keyed_reply", side_effect=RuntimeError("flush failed")):
+            result = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "flush seam"})
+        self.assertEqual(result.status_code, 503)
+        provider.assert_called_once()
+        self._assert_keyed_rows(conversation_id, status="processing", messages=1)
+
+    @patch("backend.main.generate_chat_response", return_value="reply")
+    def test_keyed_finalization_commit_failure_is_recoverable(self, provider):
+        conversation_id, key = self._new_keyed_conversation("commit_failure")
+        original_commit = __import__("sqlalchemy.orm", fromlist=["Session"]).Session.commit
+        commits = 0
+
+        def fail_second_commit(session):
+            nonlocal commits
+            commits += 1
+            if commits == 2:
+                raise RuntimeError("commit failed")
+            return original_commit(session)
+
+        with patch("backend.main.Session.commit", new=fail_second_commit):
+            result = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "commit seam"})
+        self.assertEqual(result.status_code, 503)
+        provider.assert_called_once()
+        self._assert_keyed_rows(conversation_id, status="processing", messages=1)
+
+    @patch("backend.main.generate_chat_response", return_value="committed reply")
+    def test_keyed_refresh_failure_keeps_completed_result_replayable(self, provider):
+        conversation_id, key = self._new_keyed_conversation("refresh_failure")
+        original_refresh = __import__("sqlalchemy.orm", fromlist=["Session"]).Session.refresh
+        refreshes = 0
+
+        def fail_second_refresh(session, instance, *args, **kwargs):
+            nonlocal refreshes
+            refreshes += 1
+            if refreshes == 2:
+                raise RuntimeError("refresh failed")
+            return original_refresh(session, instance, *args, **kwargs)
+
+        with patch("backend.main.Session.refresh", new=fail_second_refresh):
+            first = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "refresh seam"})
+        self.assertEqual(first.status_code, 503)
+        replay = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+            headers={"Idempotency-Key": key}, json={"content": "refresh seam"})
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json()["content"], "committed reply")
+        provider.assert_called_once()
+        self._assert_keyed_rows(conversation_id, status="completed", messages=2)
+
+    @patch("backend.main.generate_chat_response", return_value="serialized reply")
+    def test_keyed_serialization_failure_keeps_completed_result_replayable(self, provider):
+        conversation_id, key = self._new_keyed_conversation("serialization_failure")
+        with patch("backend.main._serialize_message", side_effect=RuntimeError("serialization failed")):
+            first = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "serialization seam"})
+        self.assertEqual(first.status_code, 503)
+        replay = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+            headers={"Idempotency-Key": key}, json={"content": "serialization seam"})
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json()["content"], "serialized reply")
+        provider.assert_called_once()
+        self._assert_keyed_rows(conversation_id, status="completed", messages=2)
+
+    @patch("backend.main.generate_chat_response", return_value=None)
+    def test_keyed_fallback_is_persisted_and_replayable(self, provider):
+        conversation_id, key = self._new_keyed_conversation("keyed_fallback")
+        first = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+            headers={"Idempotency-Key": key}, json={"content": "fallback"})
+        self.assertEqual(first.status_code, 201)
+        second = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+            headers={"Idempotency-Key": key}, json={"content": "fallback"})
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json(), first.json())
+        provider.assert_called_once()
+        self._assert_keyed_rows(conversation_id, status="completed", messages=2)
+
+    @patch("backend.main.generate_chat_response", return_value="must not run")
+    def test_stale_claim_recovery_failure_does_not_change_claimant(self, provider):
+        conversation_id, key = self._new_keyed_conversation("recovery_failure")
+        db = SessionLocal()
+        try:
+            user_id = db.query(User).filter(User.username == "recovery_failure").one().id
+            message = Message(conversation_id=conversation_id, role="user", content="recover")
+            db.add(message); db.flush()
+            ledger = ConversationMessageRequest(
+                user_id=user_id, conversation_id=conversation_id,
+                key_digest=__import__("hashlib").sha256(key.encode()).hexdigest(),
+                content_digest=__import__("hashlib").sha256(b"recover").hexdigest(),
+                status="processing", user_message_id=message.id, claim_token="original-token",
+                lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            )
+            db.add(ledger); db.commit()
+        finally:
+            db.close()
+        with patch("backend.main._claim_stale_request", side_effect=RuntimeError("recovery failed")):
+            result = self.client.post(f"/api/v1/conversations/{conversation_id}/messages",
+                headers={"Idempotency-Key": key}, json={"content": "recover"})
+        self.assertEqual(result.status_code, 503)
+        provider.assert_not_called()
+        _ledger_id, token, _assistant_id = self._assert_keyed_rows(
+            conversation_id, status="processing", messages=1)
+        self.assertEqual(token, "original-token")
 
     @patch("backend.main.generate_chat_response", return_value="Keyed reply")
     def test_keyed_send_replays_without_provider_or_rows(self, mock_chat):

@@ -153,6 +153,76 @@ def _expire_claim(db: Session, ledger_id: int, claim_token: str) -> bool:
         return False
 
 
+def _load_keyed_history(db: Session, conversation_id: int) -> list[Message]:
+    return db.query(Message).filter(
+        Message.conversation_id == conversation_id
+    ).order_by(Message.created_at.asc(), Message.id.asc()).all()
+
+
+def _generate_keyed_reply(history: list[Message]) -> str:
+    message_dicts = [{"role": message.role, "content": message.content} for message in history]
+    return generate_chat_response(message_dicts) or _CHAT_FALLBACK
+
+
+def _claim_stale_request(
+    db: Session,
+    ledger: ConversationMessageRequest,
+    old_token: str,
+    now: datetime,
+) -> tuple[int, str] | None:
+    new_token = secrets.token_hex(32)
+    recovery_lease = datetime.now(timezone.utc).timestamp() + CHAT_REQUEST_LEASE_SECONDS
+    changed = db.query(ConversationMessageRequest).filter(
+        ConversationMessageRequest.id == ledger.id,
+        ConversationMessageRequest.status == "processing",
+        ConversationMessageRequest.claim_token == old_token,
+        ConversationMessageRequest.lease_expires_at <= now,
+    ).update({
+        "claim_token": new_token,
+        "lease_expires_at": datetime.fromtimestamp(recovery_lease, timezone.utc),
+        "updated_at": now,
+    }, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        return None
+    db.commit()
+    return ledger.id, new_token
+
+
+def _finalize_keyed_reply(
+    db: Session,
+    ledger_id: int,
+    claim_token: str,
+    conversation_id: int,
+    reply: str,
+) -> Message:
+    assistant = Message(conversation_id=conversation_id, role="assistant", content=reply)
+    db.add(assistant)
+    db.flush()
+    completed_at = datetime.now(timezone.utc)
+    changed = db.query(ConversationMessageRequest).filter(
+        ConversationMessageRequest.id == ledger_id,
+        ConversationMessageRequest.status == "processing",
+        ConversationMessageRequest.claim_token == claim_token,
+    ).update({
+        "status": "completed",
+        "assistant_message_id": assistant.id,
+        "claim_token": None,
+        "lease_expires_at": None,
+        "completed_at": completed_at,
+        "updated_at": completed_at,
+    }, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        raise _integrity_error()
+    db.commit()
+    return assistant
+
+
+def _serialize_message(message: Message) -> "MessageResponse":
+    return MessageResponse.model_validate(message)
+
+
 @app.exception_handler(RequestValidationError)
 async def auth_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Avoid echoing submitted passwords in auth validation responses."""
@@ -352,7 +422,7 @@ def list_transportations() -> list[str]:
 
 
 @app.post("/api/v1/auth/register", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
-def register(credentials: AuthCredentials, db: Session = Depends(get_db)) -> PublicUser:
+def register(credentials: AuthCredentials, response: Response, db: Session = Depends(get_db)) -> PublicUser:
     """Create a pseudonymous account without returning credential material."""
     if db.query(User).filter(User.username == credentials.username).first() is not None:
         raise HTTPException(status_code=409, detail="Username is already registered.")
@@ -364,6 +434,8 @@ def register(credentials: AuthCredentials, db: Session = Depends(get_db)) -> Pub
         db.rollback()
         raise HTTPException(status_code=409, detail="Username is already registered.") from None
     db.refresh(record)
+    _session, raw_token = new_session(db, record, AUTH_SESSION_TTL_SECONDS)
+    set_session_cookie(response, raw_token)
     return PublicUser.model_validate(record)
 
 
@@ -685,6 +757,7 @@ def send_conversation_message(
         claim_token = secrets.token_hex(32)
         lease = now.timestamp() + CHAT_REQUEST_LEASE_SECONDS
         ledger = None
+        reservation_committed = False
         try:
             user_msg = Message(conversation_id=conversation_id, role="user", content=content)
             db.add(user_msg)
@@ -698,6 +771,7 @@ def send_conversation_message(
             )
             db.add(ledger)
             db.commit()
+            reservation_committed = True
             db.refresh(user_msg)
         except IntegrityError:
             db.rollback()
@@ -726,16 +800,8 @@ def send_conversation_message(
                     response.headers["Retry-After"] = str(max(1, min(CHAT_REQUEST_LEASE_SECONDS, ceil((ledger.lease_expires_at - now).total_seconds()))))
                     raise _key_error("idempotency_key_in_progress", "A message with this Idempotency-Key is still being processed. Retry with the same key.", 409, {"Retry-After": response.headers["Retry-After"]})
                 old_token = ledger.claim_token
-                new_token = secrets.token_hex(32)
-                recovery_lease = datetime.now(timezone.utc).timestamp() + CHAT_REQUEST_LEASE_SECONDS
-                changed = db.query(ConversationMessageRequest).filter(
-                    ConversationMessageRequest.id == ledger.id,
-                    ConversationMessageRequest.status == "processing",
-                    ConversationMessageRequest.claim_token == old_token,
-                    ConversationMessageRequest.lease_expires_at <= now,
-                ).update({"claim_token": new_token, "lease_expires_at": datetime.fromtimestamp(recovery_lease, timezone.utc), "updated_at": now}, synchronize_session=False)
-                if changed != 1:
-                    db.rollback()
+                claimed = _claim_stale_request(db, ledger, old_token, now)
+                if claimed is None:
                     current = db.query(ConversationMessageRequest).filter(ConversationMessageRequest.id == ledger.id).first()
                     if current is None or current.status not in {"processing", "completed"}:
                         raise _integrity_error()
@@ -748,8 +814,7 @@ def send_conversation_message(
                         return MessageResponse.model_validate(assistant)
                     response.headers["Retry-After"] = str(max(1, min(CHAT_REQUEST_LEASE_SECONDS, ceil((current.lease_expires_at - datetime.now(timezone.utc)).total_seconds()))))
                     raise _key_error("idempotency_key_in_progress", "A message with this Idempotency-Key is still being processed. Retry with the same key.", 409, {"Retry-After": response.headers["Retry-After"]})
-                db.commit()
-                claim_token = new_token
+                ledger_id, claim_token = claimed
                 user_msg = db.get(Message, ledger.user_message_id)
                 if not _valid_user_message(user_msg, conversation_id, content):
                     raise _integrity_error()
@@ -764,39 +829,50 @@ def send_conversation_message(
             raise
         except Exception:
             db.rollback()
+            if reservation_committed and ledger is not None:
+                _expire_claim(db, ledger.id, claim_token)
             raise _generation_error()
 
         try:
-            history = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.asc(), Message.id.asc()).all()
+            history = _load_keyed_history(db, conversation_id)
             if not _valid_history(history, conversation_id) or not _valid_user_message(user_msg, conversation_id, content):
                 raise _integrity_error()
-            message_dicts = [{"role": m.role, "content": m.content} for m in history]
             db.rollback()
-            ai_reply_text = generate_chat_response(message_dicts) or _CHAT_FALLBACK
         except HTTPException:
             db.rollback()
+            _expire_claim(db, ledger.id, claim_token)
             raise
         except Exception:
             db.rollback()
             _expire_claim(db, ledger.id, claim_token)
             raise _generation_error()
         try:
-            assistant_msg = Message(conversation_id=conversation_id, role="assistant", content=ai_reply_text)
-            db.add(assistant_msg)
-            db.flush()
-            changed = db.query(ConversationMessageRequest).filter(ConversationMessageRequest.id == ledger.id, ConversationMessageRequest.status == "processing", ConversationMessageRequest.claim_token == claim_token).update({"status": "completed", "assistant_message_id": assistant_msg.id, "claim_token": None, "lease_expires_at": None, "completed_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}, synchronize_session=False)
-            if changed != 1:
-                db.rollback()
-                raise _integrity_error()
-            db.commit()
-            db.refresh(assistant_msg)
-            return MessageResponse.model_validate(assistant_msg)
+            ai_reply_text = _generate_keyed_reply(history)
+        except HTTPException:
+            db.rollback()
+            _expire_claim(db, ledger.id, claim_token)
+            raise
+        except Exception:
+            db.rollback()
+            _expire_claim(db, ledger.id, claim_token)
+            raise _generation_error()
+        try:
+            assistant_msg = _finalize_keyed_reply(db, ledger.id, claim_token, conversation_id, ai_reply_text)
         except HTTPException:
             _expire_claim(db, ledger.id, claim_token)
             raise
         except Exception:
             db.rollback()
             _expire_claim(db, ledger.id, claim_token)
+            raise _generation_error()
+        try:
+            db.refresh(assistant_msg)
+        except Exception:
+            db.rollback()
+            raise _generation_error()
+        try:
+            return _serialize_message(assistant_msg)
+        except Exception:
             raise _generation_error()
 
     user_msg = Message(

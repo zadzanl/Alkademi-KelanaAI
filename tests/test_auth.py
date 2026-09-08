@@ -85,8 +85,10 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/auth/me").status_code, 401)
         db = SessionLocal()
         try:
-            self.assertIsNotNone(db.query(Session).one().revoked_at)
-            db.query(Session).one().expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            sessions = db.query(Session).all()
+            self.assertTrue(any(session.revoked_at is not None for session in sessions))
+            active = next(session for session in sessions if session.revoked_at is None)
+            active.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
             db.commit()
         finally:
             db.close()
