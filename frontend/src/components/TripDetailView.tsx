@@ -185,8 +185,24 @@ export function TripDetailView({
 
       <section aria-labelledby="places-heading" className="border-b border-surface-rule py-9">
         <h2 id="places-heading" className="font-display text-3xl text-ink">Places to consider</h2>
-        {trip.recommended_places.length ? <ul className="mt-5 grid gap-3 sm:grid-cols-2">{trip.recommended_places.map((place) => <li key={place} className="rounded-surface border border-surface-rule bg-paper-light px-4 py-3 font-semibold">{place}</li>)}</ul> : <p className="mt-3 text-sm text-muted-ink">No place list was returned, but the rest of your plan is ready.</p>}
-        <p className="mt-5 text-sm text-muted-ink">Your plan combines the trip details you provided with curated travel knowledge when available.</p>
+        {trip.recommended_places.length ? (
+          <>
+            <ul className="mt-5 grid gap-3 sm:grid-cols-2">
+              {trip.recommended_places.map((place, idx) => (
+                <li key={`${place}-${idx}`} className="rounded-surface border border-surface-rule bg-paper-light px-4 py-3 font-semibold">
+                  {place}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-5 text-sm text-muted-ink">
+              AI-suggested places to consider for this destination. Verify opening hours, access, and local conditions before you go.
+            </p>
+          </>
+        ) : (
+          <p className="mt-3 text-sm text-muted-ink">
+            Place suggestions are unavailable right now. The rest of your trip plan is still available.
+          </p>
+        )}
       </section>
 
       {/* 4. AI Itinerary Narrative */}

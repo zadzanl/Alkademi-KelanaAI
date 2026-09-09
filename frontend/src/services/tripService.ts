@@ -227,6 +227,7 @@ function isTripResponse(data: unknown): data is TripResponse {
     typeof t.travel_season === "string" &&
     typeof t.category === "string" &&
     Array.isArray(t.recommended_places) &&
+    t.recommended_places.every((item) => typeof item === "string") &&
     typeof t.recommended_transportation === "string" &&
     typeof t.created_at === "string" &&
     (typeof t.ai_recommendation === "string" || t.ai_recommendation === null)

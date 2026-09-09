@@ -74,27 +74,182 @@ body {
   color: var(--ink);
   font-family: var(--font-source-sans), Arial, Helvetica, sans-serif;
   overflow-x: hidden;
+  isolation: isolate;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 [data-theme="dark"] body {
   background-color: #000000;
   background-image:
-    radial-gradient(circle at 9% 18%, rgb(255 255 255 / 40%) 0 1px, transparent 1.4px),
-    radial-gradient(circle at 72% 8%, rgb(153 210 255 / 28%) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 37% 72%, rgb(255 255 255 / 20%) 0 0.8px, transparent 1.3px),
-    radial-gradient(circle at 91% 62%, rgb(151 229 218 / 22%) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 4% 11%, rgb(255 255 255 / 34%) 0 0.8px, transparent 1.2px),
+    radial-gradient(circle at 17% 46%, rgb(153 210 255 / 25%) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 29% 7%, rgb(255 255 255 / 30%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 43% 31%, rgb(151 229 218 / 24%) 0 0.8px, transparent 1.3px),
+    radial-gradient(circle at 58% 13%, rgb(255 255 255 / 36%) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 68% 39%, rgb(153 210 255 / 24%) 0 0.9px, transparent 1.4px),
+    radial-gradient(circle at 79% 19%, rgb(255 255 255 / 30%) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 94% 47%, rgb(151 229 218 / 24%) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 11% 79%, rgb(255 255 255 / 25%) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 36% 91%, rgb(153 210 255 / 22%) 0 0.8px, transparent 1.3px),
+    radial-gradient(circle at 63% 74%, rgb(255 255 255 / 28%) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 88% 86%, rgb(151 229 218 / 22%) 0 0.8px, transparent 1.3px),
     radial-gradient(ellipse 88% 54% at 96% -8%, rgb(79 103 151 / 26%) 0 46%, rgb(82 63 135 / 10%) 62%, transparent 74%),
-    radial-gradient(ellipse 60% 44% at 2% 104%, rgb(13 118 110 / 10%), transparent 72%),
+    radial-gradient(ellipse 72% 52% at -4% 108%, rgb(13 118 110 / 16%) 0%, rgb(13 118 110 / 8%) 34%, transparent 72%),
+    radial-gradient(ellipse 46% 38% at 16% 92%, rgb(67 56 143 / 11%), transparent 70%),
     linear-gradient(145deg, #000000 0%, #000000 48%, #000000 100%);
   background-attachment: fixed;
-  background-size: 17rem 19rem, 23rem 29rem, 31rem 27rem, 37rem 41rem, 100% 100%, 100% 100%, 100% 100%;
+  background-size: 100% 100%;
 }
 
 /* Page-level canvas wrappers should reveal the night sky; functional surfaces
    continue to use paper-light or paper-surface and stay opaque. */
 [data-theme="dark"] .bg-paper {
   background-color: transparent;
+}
+
+/* Persistent light-mode nature layer. The artwork stays behind page content;
+   direct-child canvas exposure leaves nested controls and panels opaque. */
+.nature-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  display: none;
+}
+
+/* Botanical green keeps the light-mode hero distinct from the night-sky
+   palette without changing the shared indigo token used elsewhere. */
+:root:not([data-theme="dark"]) .hero-panel {
+  background-color: #174f45;
+}
+
+/* A static paper veil softens artwork without filtering text or introducing
+  a full-viewport backdrop blur. Keep this treatment light-mode-only. */
+:root:not([data-theme="dark"]) .nature-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(255 255 227 / 70%);
+  pointer-events: none;
+}
+
+:root:not([data-theme="dark"]) .nature-background {
+  display: block;
+}
+
+[data-theme="dark"] .nature-background {
+  display: none;
+}
+
+:root:not([data-theme="dark"]) body > .bg-paper {
+  background-color: transparent;
+}
+
+:root:not([data-theme="dark"]) .nature-page-canvas {
+  background-color: transparent;
+}
+
+.nature-background,
+.nature-background * {
+  pointer-events: none;
+}
+
+:root:not([data-theme="dark"]) .nature-background__aura {
+  position: absolute;
+  inset: -8vmax;
+  background:
+    radial-gradient(ellipse at 96% 8%, rgb(13 118 110 / 10%) 0 15%, rgb(217 245 239 / 14%) 35%, transparent 68%),
+    radial-gradient(ellipse at 5% 92%, rgb(13 118 110 / 8%) 0 16%, rgb(217 245 239 / 13%) 36%, transparent 70%),
+    radial-gradient(circle at 8% 44%, rgb(166 203 145 / 7%), transparent 54%);
+  filter: blur(44px);
+  opacity: .72;
+  pointer-events: none;
+}
+
+.nature-vine {
+  position: absolute;
+  width: clamp(12rem, 36vw, 30rem);
+  color: rgb(61 132 90 / 44%);
+  opacity: .84;
+}
+
+.nature-vine--top-right { top: -7rem; right: -6rem; }
+.nature-vine--bottom-left { bottom: -8rem; left: -7rem; }
+
+.nature-vine svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.nature-vine__stem { stroke-width: 3; }
+
+.nature-flowers {
+  position: absolute;
+  inset: 0;
+}
+
+.nature-flower {
+  position: absolute;
+  height: auto;
+  transform-origin: center;
+  color: rgb(17 24 39 / 18%);
+}
+
+.nature-flower__center { fill: rgb(13 118 110 / 45%); }
+
+.nature-flower--one { top: 20%; right: 6%; width: 1.6rem; transform: rotate(12deg); }
+.nature-flower--two { bottom: 28%; left: 9%; width: 1.4rem; transform: rotate(-16deg); }
+
+.nature-motif { position: absolute; color: rgb(17 24 39 / 22%); }
+.nature-motif svg { display: block; width: 100%; height: auto; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.nature-motif__accent { stroke: rgb(13 118 110 / 50%); }
+.nature-motif--route .nature-motif__accent { fill: rgb(13 118 110 / 50%); }
+.nature-motif__dash { stroke-dasharray: 6 8; }
+.nature-motif--plane { top: 5%; left: 3%; width: clamp(9rem, 18vw, 14rem); }
+.nature-motif--compass { top: 42%; left: 2%; width: clamp(2.75rem, 5vw, 3.5rem); }
+.nature-motif--globe { bottom: 9%; right: 5%; width: clamp(3rem, 6vw, 4rem); }
+.nature-motif--route { top: 52%; right: 3%; width: clamp(4rem, 8vw, 6rem); }
+
+@media (max-width: 40rem) {
+  .nature-motif--route { display: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nature-vine {
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+    animation: nature-vine-sway 11s ease-in-out infinite alternate;
+  }
+
+  .nature-vine--top-right {
+    animation-delay: -6s;
+    animation-duration: 13s;
+    transform-origin: 100% 0%;
+  }
+
+  .nature-vine--bottom-left {
+    animation-delay: -2.5s;
+    animation-duration: 15s;
+    transform-origin: 0% 100%;
+  }
+
+  .nature-motif__dash { animation: nature-dash-march 40s linear infinite; }
+}
+
+@keyframes nature-vine-sway {
+  from { transform: rotate(-1.2deg); }
+  to { transform: rotate(1.2deg); }
+}
+
+@keyframes nature-dash-march {
+  to { stroke-dashoffset: -14; }
 }
 
 ::selection { background: var(--terracotta); color: #ffffff; }
@@ -187,6 +342,10 @@ a {
   --tw-prose-pre-code: #ffffff;
   --tw-prose-pre-bg: var(--indigo);
   overflow-wrap: anywhere;
+}
+
+:root:not([data-theme="dark"]) .journal-prose {
+  font-weight: 450;
 }
 
 .journal-prose a { text-decoration: underline; }

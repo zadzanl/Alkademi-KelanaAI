@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Instrument_Serif, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
 import { AppHeader } from "../components/AppHeader";
+import { NatureBackground } from "../components/NatureBackground";
 import { getCurrentUser } from "../services/authService";
 
 const instrumentSerif = Instrument_Serif({
@@ -41,6 +42,7 @@ export default async function RootLayout({
       <body
         className={`${instrumentSerif.variable} ${sourceSans.variable} antialiased`}
       >
+        <NatureBackground />
         <AppHeader username={user?.username} />
         {children}
       </body>

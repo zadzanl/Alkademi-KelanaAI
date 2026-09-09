@@ -28,7 +28,7 @@ import logging
 import secrets
 import threading
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -58,6 +58,7 @@ from backend.services.auth_service import (
 from backend.services.ai_service import (
     generate_chat_response,
     generate_rag_comparison,
+    generate_trip_outputs,
     get_ai_recommendation,
     log_ai_provider_config,
 )
@@ -253,7 +254,7 @@ class TripRequest(BaseModel):
     country: str = Field(max_length=100)
     days: int = Field(gt=0)
     budget: float
-    currency: str = Field(max_length=10)
+    currency: Literal["USD", "IDR"]
     travel_month: str = Field(max_length=20)
 
 
@@ -485,10 +486,24 @@ def create_trip(
     # FastAPI invokes `get_db()` for this request and yields one SQLAlchemy
     # session that is closed automatically once the response is sent; the
     # route body should not call `db.close()` itself.
-    category = get_trip_category(trip.budget)
-    # Calculation-to-snapshot boundary: the unchanged service functions
-    # above produce derived values; everything below builds the complete
-    # `Trip` row that will be persisted.
+    category = get_trip_category(trip.budget, trip.days, trip.currency)
+    daily_budget = calculate_daily_budget(trip.budget, trip.days)
+    travel_season = get_travel_season(trip.travel_month)
+    recommended_transportation = get_recommended_transportation(category)
+
+    # Paired concurrent AI generation (itinerary narrative and destination-aware places)
+    gen_result = generate_trip_outputs(
+        destination=trip.destination,
+        country=trip.country,
+        days=trip.days,
+        budget=trip.budget,
+        currency=trip.currency,
+        travel_month=trip.travel_month,
+        category=category,
+        recommended_transportation=recommended_transportation,
+        travel_season=travel_season,
+    )
+
     record = Trip(
         user_id=user.id,
         destination=trip.destination,
@@ -497,58 +512,18 @@ def create_trip(
         budget=trip.budget,
         currency=trip.currency,
         travel_month=trip.travel_month,
-        daily_budget=calculate_daily_budget(trip.budget, trip.days),
-        travel_season=get_travel_season(trip.travel_month),
+        daily_budget=daily_budget,
+        travel_season=travel_season,
         category=category,
-        recommended_places=get_recommended_places(category),
-        recommended_transportation=get_recommended_transportation(category),
-    )
-    generation_started = time.perf_counter()
-    record.ai_recommendation = get_ai_recommendation(
-        destination=trip.destination,
-        country=trip.country,
-        days=trip.days,
-        budget=trip.budget,
-        currency=trip.currency,
-        travel_month=trip.travel_month,
-        category=category,
-        recommended_places=record.recommended_places,
-        recommended_transportation=record.recommended_transportation,
-        travel_season=record.travel_season,
+        recommended_places=gen_result.places if gen_result.places is not None else [],
+        recommended_transportation=recommended_transportation,
+        ai_recommendation=gen_result.itinerary,
     )
     db.add(record)
     db.commit()
     # Refresh reloads database-issued values (notably `id` and `created_at`)
     # so they are part of the response before explicit conversion.
     db.refresh(record)
-    rag_logging_enabled = (
-        os.getenv("RAG_COMPARISON_LOGGING", "false").lower() == "true"
-        and os.getenv("RAG_ENABLED", "true").lower() == "true"
-    )
-    if rag_logging_enabled:
-        elapsed_ms = int((time.perf_counter() - generation_started) * 1000)
-        metrics = {
-            "event": "rag_inference",
-            "trip_id": record.id,
-            "provider": "openrouter" if os.getenv("OPENROUTER_MODEL") else "bedrock",
-            "rag_enabled": True,
-            "bedrock_ms": 0,
-            "exa_ms": 0,
-            "total_retrieval_ms": 0,
-            "generation_ms": elapsed_ms,
-            "total_ms": elapsed_ms,
-            "kb_chunks_count": 0,
-            "exa_highlights_count": 0,
-            "top_chunk_score": 0.0,
-            "top_exa_score": 0.0,
-            "sources": [],
-            "web_domains": [],
-            "bedrock_fallback": False,
-            "exa_fallback": False,
-        }
-        logging.getLogger("backend.services.ai_service").info(
-            "RAG_METRICS:%s", json.dumps(metrics, separators=(",", ":"))
-        )
     return TripResponse.model_validate(record)
 
 @app.post("/api/v1/knowledge/compare")
@@ -631,9 +606,9 @@ def update_trip_budget(
 
     row.budget = update.budget
     row.daily_budget = calculate_daily_budget(row.budget, row.days)
-    new_category = get_trip_category(row.budget)
+    new_category = get_trip_category(row.budget, row.days, row.currency)
     row.category = new_category
-    row.recommended_places = get_recommended_places(new_category)
+    # Preserve recommended_places and ai_recommendation creation snapshots; do not call AI
     row.recommended_transportation = get_recommended_transportation(new_category)
 
     db.commit()

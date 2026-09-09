@@ -269,7 +269,7 @@ export default function ChatPage() {
           isLoadingHistory={isLoadingHistory}
           isCreatingChat={isCreatingChat}
         />
-        <main id="main-content" className="flex-1 flex flex-col bg-paper-light relative">
+        <main id="main-content" className="flex-1 flex flex-col bg-paper-light relative nature-page-canvas">
           <div className="px-6 py-3 border-b border-surface-rule bg-paper-surface flex items-center justify-between gap-3 shadow-2xs">
             <div className="flex min-w-0 items-center gap-3">
               <button

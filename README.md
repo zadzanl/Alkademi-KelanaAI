@@ -407,6 +407,83 @@ npm run lint
 npm run build
 ```
 
+## Public Deployment (Vercel + FastAPI Cloud + Neon)
+
+The supported initial public-beta topology keeps the existing frontend and API
+as separate deployments:
+
+```text
+Browser -> Vercel (Next.js frontend)
+         -> FastAPI Cloud (backend.main:app)
+           -> Neon Postgres
+```
+
+This repository includes root deployment metadata for FastAPI Cloud:
+
+- `pyproject.toml` declares Python 3.12-3.13 compatibility and the explicit
+  `backend.main:app` entrypoint.
+- `pyproject.toml` mirrors the exact pins in `backend/requirements.txt` and uses
+  the matching `fastapi[standard]` extra required by the FastAPI Cloud CLI. The
+  deployment regression test fails if these manifests drift.
+- `.fastapicloudignore` excludes local environments, secrets, frontend assets,
+  test data, and planning artifacts from API uploads.
+
+### Deployment order
+
+1. Create or select a Neon production branch, preferably in Singapore for this
+  Indonesia-focused application.
+2. Use Neon's direct, non-pooled connection for schema creation, migrations,
+  backups, and schema verification. Do not run migrations through the pooled
+  endpoint.
+3. Connect Neon to FastAPI Cloud through its Neon integration where available,
+  or set the pooled TLS connection string as the encrypted `DATABASE_URL`
+  secret. The application runtime uses the pooled endpoint; migration work
+  uses the direct endpoint separately.
+4. Configure FastAPI Cloud variables. At minimum use
+  `ENVIRONMENT=production`, `AUTH_SESSION_COOKIE=kelana_session`,
+  `AUTH_SESSION_TTL_SECONDS=604800`, and the selected OpenRouter model and
+  encrypted API key. Keep RAG, Bedrock, Exa, and comparison features disabled
+  until independently verified.
+5. From the repository root, verify the entrypoint with the FastAPI CLI, then
+  deploy with `fastapi deploy`. FastAPI Cloud must report a verified
+  deployment before the frontend points at it.
+6. Import this repository into Vercel with `frontend` as the Root Directory.
+  Set production `API_URL` to the FastAPI Cloud HTTPS URL and set the same
+  `AUTH_SESSION_COOKIE` value. `API_URL` is server-only and must not be renamed
+  to `NEXT_PUBLIC_API_URL`.
+7. Verify health, registration/login, refresh persistence, trip CRUD, chat,
+  ownership isolation, and one real OpenRouter-backed trip request through the
+  public Vercel URL.
+
+### Environment and preview safety
+
+Never commit `.env` files, Neon connection strings, OpenRouter keys, AWS
+credentials, or Exa keys. FastAPI Cloud secrets must be marked encrypted; bulk
+`.env` imports do not automatically classify values as secrets. Vercel
+production variables must point only to production API infrastructure. A
+write-capable preview must use a deliberately provisioned staging API/database
+target; otherwise protect the preview from writes rather than sharing
+production credentials.
+
+### Migration and rollback rules
+
+`Base.metadata.create_all()` creates missing tables but does not upgrade an
+existing table. Apply additive migrations before deploying code that requires
+them, because FastAPI Cloud gradual deployments can briefly run old and new API
+instances together. Stage destructive removals after the deployed code no
+longer requires the removed structure. If a release fails, stop directing the
+frontend at the failing API or restore the last verified application deployment
+without dropping production tables or data. Record any migration state before
+retrying.
+
+### Account actions that require the owner
+
+The deployment operator must authorize Vercel, FastAPI Cloud, and Neon accounts,
+approve the FastAPI Cloud-Neon OAuth integration, create the OpenRouter key,
+approve billing or custom-domain changes, and perform DNS ownership verification
+when applicable. These actions must happen in the provider dashboards or a
+trusted terminal; secrets must not be sent through chat.
+
 ## Release
 
 - `v0.1.0` — Initial console-based Trip Summary Generator.

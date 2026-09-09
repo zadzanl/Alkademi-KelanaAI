@@ -25,6 +25,7 @@ from backend.migrations import (
 from backend.models.session import Session as AuthSession
 from backend.models.trip import Trip
 from backend.models.user import User
+from backend.services.ai_service import TripGenerationResult
 
 
 class TripApiTests(unittest.TestCase):
@@ -43,7 +44,19 @@ class TripApiTests(unittest.TestCase):
         cls.client.__exit__(None, None, None)
 
     def setUp(self) -> None:
-        self.ai_patch = patch("backend.main.get_ai_recommendation", return_value="## Trip plan")
+        self.default_generation_result = TripGenerationResult(
+            itinerary="## Trip plan",
+            places=["Tokyo Tower", "Shibuya", "Mount Fuji"],
+            provider="openrouter",
+            itinerary_status="success",
+            places_status="success",
+            retrieval_status="skipped",
+            metrics={},
+        )
+        self.ai_patch = patch(
+            "backend.main.generate_trip_outputs",
+            return_value=self.default_generation_result,
+        )
         self.ai_mock = self.ai_patch.start()
         self.addCleanup(self.ai_patch.stop)
         self.client.cookies.clear()
@@ -423,31 +436,184 @@ class TripApiTests(unittest.TestCase):
 
         updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700}).json()
 
-        for field in ("id", "destination", "country", "days", "currency", "travel_month", "travel_season", "created_at", "ai_recommendation"):
+        for field in ("id", "destination", "country", "days", "currency", "travel_month", "travel_season", "created_at", "ai_recommendation", "recommended_places"):
             self.assertEqual(updated[field], created[field])
 
     def test_ai_failure_still_creates_trip_with_null(self) -> None:
-        self.ai_mock.return_value = None
+        self.ai_mock.return_value = TripGenerationResult(
+            itinerary=None,
+            places=[],
+            provider=None,
+            itinerary_status="no_provider",
+            places_status="no_provider",
+            retrieval_status="skipped",
+            metrics={},
+        )
         response = self.client.post("/api/v1/trips", json=self.valid_request())
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["ai_recommendation"])
+        self.assertEqual(response.json()["recommended_places"], [])
 
     def test_put_preserves_ai_recommendation_without_invocation(self) -> None:
         created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
         self.ai_mock.reset_mock()
-        updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
-        self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()["ai_recommendation"], created["ai_recommendation"])
-        self.ai_mock.assert_not_called()
+        with patch("backend.main.get_ai_recommendation") as legacy_mock:
+            updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
+            self.assertEqual(updated.status_code, 200)
+            self.assertEqual(updated.json()["ai_recommendation"], created["ai_recommendation"])
+            self.assertEqual(updated.json()["recommended_places"], created["recommended_places"])
+            self.ai_mock.assert_not_called()
+            legacy_mock.assert_not_called()
 
     def test_put_preserves_null_ai_recommendation_without_invocation(self) -> None:
-        self.ai_mock.return_value = None
+        self.ai_mock.return_value = TripGenerationResult(
+            itinerary=None,
+            places=[],
+            provider=None,
+            itinerary_status="no_provider",
+            places_status="no_provider",
+            retrieval_status="skipped",
+            metrics={},
+        )
         created = self.client.post("/api/v1/trips", json=self.valid_request()).json()
         self.assertIsNone(created["ai_recommendation"])
+        self.assertEqual(created["recommended_places"], [])
         self.ai_mock.reset_mock()
-        updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
-        self.assertEqual(updated.status_code, 200)
-        self.assertIsNone(updated.json()["ai_recommendation"])
+        with patch("backend.main.get_ai_recommendation") as legacy_mock:
+            updated = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 700})
+            self.assertEqual(updated.status_code, 200)
+            self.assertIsNone(updated.json()["ai_recommendation"])
+            self.assertEqual(updated.json()["recommended_places"], [])
+            self.ai_mock.assert_not_called()
+            legacy_mock.assert_not_called()
+
+    def test_create_trip_destination_aware_places(self) -> None:
+        bali_places = ["Ubud Monkey Forest", "Tanah Lot Temple", "Uluwatu Cliff"]
+        self.ai_mock.return_value = TripGenerationResult(
+            itinerary="## Bali Itinerary",
+            places=bali_places,
+            provider="openrouter",
+            itinerary_status="success",
+            places_status="success",
+            retrieval_status="skipped",
+            metrics={},
+        )
+        response = self.client.post(
+            "/api/v1/trips",
+            json=self.valid_request(destination="Bali", country="Indonesia"),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["recommended_places"], bali_places)
+        self.assertEqual(body["ai_recommendation"], "## Bali Itinerary")
+
+    def test_create_trip_places_failure_falls_back_to_empty_list(self) -> None:
+        self.ai_mock.return_value = TripGenerationResult(
+            itinerary="## Bali Itinerary",
+            places=[],
+            provider="openrouter",
+            itinerary_status="success",
+            places_status="invalid_places",
+            retrieval_status="skipped",
+            metrics={},
+        )
+        response = self.client.post(
+            "/api/v1/trips",
+            json=self.valid_request(destination="Bali", country="Indonesia"),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["recommended_places"], [])
+        self.assertEqual(body["ai_recommendation"], "## Bali Itinerary")
+
+    def test_create_trip_itinerary_failure_preserves_places(self) -> None:
+        bali_places = ["Ubud Monkey Forest", "Tanah Lot Temple", "Uluwatu Cliff"]
+        self.ai_mock.return_value = TripGenerationResult(
+            itinerary=None,
+            places=bali_places,
+            provider="openrouter",
+            itinerary_status="provider_error",
+            places_status="success",
+            retrieval_status="skipped",
+            metrics={},
+        )
+        response = self.client.post(
+            "/api/v1/trips",
+            json=self.valid_request(destination="Bali", country="Indonesia"),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["recommended_places"], bali_places)
+        self.assertIsNone(body["ai_recommendation"])
+
+    def test_create_trip_does_not_call_legacy_get_ai_recommendation(self) -> None:
+        with patch("backend.main.get_ai_recommendation") as legacy_mock:
+            response = self.client.post("/api/v1/trips", json=self.valid_request())
+            self.assertEqual(response.status_code, 200)
+            legacy_mock.assert_not_called()
+
+    def test_budget_update_preserves_custom_places_and_calls_no_ai(self) -> None:
+        custom_places = ["Mount Bromo", "Ijen Crater", "Malang Apple Orchard"]
+        self.ai_mock.return_value = TripGenerationResult(
+            itinerary="## East Java Tour",
+            places=custom_places,
+            provider="openrouter",
+            itinerary_status="success",
+            places_status="success",
+            retrieval_status="skipped",
+            metrics={},
+        )
+        created = self.client.post(
+            "/api/v1/trips",
+            json=self.valid_request(destination="East Java", country="Indonesia", budget=2000),
+        ).json()
+        self.assertEqual(created["recommended_places"], custom_places)
+
+        self.ai_mock.reset_mock()
+        with patch("backend.main.get_ai_recommendation") as legacy_mock:
+            put_resp = self.client.put(f"/api/v1/trips/{created['id']}", json={"budget": 500})
+            self.assertEqual(put_resp.status_code, 200)
+            updated = put_resp.json()
+            self.assertEqual(updated["budget"], 500.0)
+            self.assertEqual(updated["category"], "Backpacker")
+            self.assertEqual(updated["recommended_transportation"], "Bus")
+            self.assertEqual(updated["recommended_places"], custom_places)
+            self.assertEqual(updated["ai_recommendation"], "## East Java Tour")
+            self.ai_mock.assert_not_called()
+            legacy_mock.assert_not_called()
+
+    def test_legacy_string_arrays_read_preserved(self) -> None:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == "default_user").first()
+            legacy_places = [" Place with space ", "Duplicate", "duplicate", "Extra4", "Extra5", "Extra6"]
+            trip = Trip(
+                user_id=user.id,
+                destination="Legacy Dest",
+                country="Legacy Country",
+                days=3,
+                budget=500.0,
+                currency="USD",
+                travel_month="June",
+                daily_budget=166.67,
+                travel_season="Holiday Season",
+                category="Backpacker",
+                recommended_places=legacy_places,
+                recommended_transportation="Bus",
+                ai_recommendation="## Stored",
+            )
+            db.add(trip)
+            db.commit()
+            db.refresh(trip)
+            trip_id = trip.id
+        finally:
+            db.close()
+
+        self.ai_mock.reset_mock()
+        resp = self.client.get(f"/api/v1/trips/{trip_id}")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["recommended_places"], legacy_places)
         self.ai_mock.assert_not_called()
 
     def test_string_max_lengths_are_rejected(self) -> None:

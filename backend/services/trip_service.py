@@ -34,8 +34,18 @@ def get_travel_season(month: str) -> str:
     return "Regular Season"
 
 
-def get_trip_category(budget: float) -> str:
+IDR_PER_USD = 16_500
+
+def get_trip_category(budget: float, days: int = 1, currency: str = "USD") -> str:
     """Classify an entered budget using the lesson's nominal thresholds."""
+    if days <= 0:
+        raise ValueError("Trip duration must be greater than zero")
+    currency = currency.upper()
+    if currency == "IDR":
+        budget = budget / IDR_PER_USD
+    elif currency != "USD":
+        raise ValueError(f"Unsupported currency: {currency}")
+    budget /= days
     if budget < 1000:
         return "Backpacker"
     if budget < 3000:

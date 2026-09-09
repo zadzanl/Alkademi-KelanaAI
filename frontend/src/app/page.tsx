@@ -216,7 +216,7 @@ export default function Home() {
           ))}
           <div className="absolute inset-0 -z-10 bg-black/60" aria-hidden="true" />
           <div className="relative flex min-h-[36rem] items-center sm:min-h-[38rem] lg:min-h-[40rem]">
-            <div className="max-w-2xl bg-indigo px-6 py-10 text-white sm:px-10 sm:py-14 lg:px-12 lg:py-16">
+            <div className="hero-panel max-w-2xl bg-indigo px-6 py-10 text-white sm:px-10 sm:py-14 lg:px-12 lg:py-16">
               <h1 className="font-display max-w-[11ch] text-[clamp(3.25rem,7vw,5.5rem)] leading-[0.91] tracking-[-0.03em]">
                 Go farther with a plan that feels like you.
               </h1>
@@ -357,6 +357,19 @@ export default function Home() {
                   role="status"
                   aria-live="polite"
                 >
+                  <div
+                    className="h-2 overflow-hidden rounded-full bg-paper/70"
+                    role="progressbar"
+                    aria-label="Trip generation progress"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.min(92, (waitStage + 1) * 23)}
+                  >
+                    <div
+                      className="h-full rounded-full bg-terracotta transition-[width] duration-500 motion-reduce:transition-none"
+                      style={{ width: `${Math.min(92, (waitStage + 1) * 23)}%` }}
+                    />
+                  </div>
                   <p>{[
                     `Reading your ${values.days}-day ${values.destination || "trip"} brief…`,
                     `Considering ${values.travel_month} season and your ${values.currency} budget…`,
@@ -364,7 +377,7 @@ export default function Home() {
                     "Writing your trip snapshot…",
                   ][waitStage]}</p>
                   <p className="text-xs font-normal text-muted-ink">
-                    This may take up to 2 minutes. These stages describe the work, not measured progress.
+                    Stage {waitStage + 1} of 4 · This is a time estimate.
                   </p>
                   <button
                     ref={stopWaitingRef}

@@ -81,9 +81,10 @@ class AiServiceTests(unittest.TestCase):
         self.assertEqual(ai_service.get_ai_recommendation(**self.values()), "hi")
         request = client.post.call_args.kwargs
         self.assertEqual(
-            request["json"]["extra_body"],
-            {"chat_template_kwargs": {"enable_thinking": True, "low_effort": True}},
+            request["json"]["reasoning"],
+            {"enabled": False},
         )
+        self.assertEqual(request["json"]["max_tokens"], 1200)
         response.raise_for_status.side_effect = RuntimeError("failure")
         with self.assertLogs(ai_service.logger, level="ERROR") as logs:
             self.assertIsNone(ai_service.get_ai_recommendation(**self.values()))
@@ -266,6 +267,374 @@ class AiServiceTests(unittest.TestCase):
         self.assertEqual(sent_messages[1]["content"], "3")
         self.assertEqual(sent_messages[2]["content"], "4")
         self.assertEqual(sent_messages[3]["content"], "5")
+
+    # --- Destination-aware places & paired generation tests ---
+
+    def test_prompt_isolation_and_delimited_data(self) -> None:
+        itin_prompt = ai_service._build_itinerary_prompt(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="June",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Holiday Season",
+        )
+        self.assertIn("<trip_details>", itin_prompt)
+        self.assertIn("destination: Bali", itin_prompt)
+        self.assertIn("country: Indonesia", itin_prompt)
+        self.assertNotIn("inspiration", itin_prompt.lower())
+        self.assertNotIn("Tokyo Tower", itin_prompt)
+        self.assertNotIn("OUTPUT CONTRACT:", itin_prompt)
+
+        places_prompt = ai_service._build_places_prompt(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="June",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Holiday Season",
+        )
+        self.assertIn("<trip_details>", places_prompt)
+        self.assertIn("destination: Bali", places_prompt)
+        self.assertIn("OUTPUT CONTRACT:", places_prompt)
+        self.assertIn("JSON array of 3 to 5", places_prompt)
+        self.assertNotIn("Morning, Afternoon, Evening", places_prompt)
+
+    def test_parse_and_validate_places(self) -> None:
+        # Valid JSON array
+        self.assertEqual(
+            ai_service.parse_and_validate_places('["Place 1", "Place 2", "Place 3"]'),
+            ["Place 1", "Place 2", "Place 3"],
+        )
+        # Valid outer markdown fence
+        self.assertEqual(
+            ai_service.parse_and_validate_places('```json\n["Place 1", "Place 2", "Place 3"]\n```'),
+            ["Place 1", "Place 2", "Place 3"],
+        )
+        # Valid outer fence without 'json' tag
+        self.assertEqual(
+            ai_service.parse_and_validate_places('```\n["Place 1", "Place 2", "Place 3"]\n```'),
+            ["Place 1", "Place 2", "Place 3"],
+        )
+        # Deduplication case-insensitive, preserves first occurrence
+        self.assertEqual(
+            ai_service.parse_and_validate_places('["Place A", "place a", "Place B", "Place C"]'),
+            ["Place A", "Place B", "Place C"],
+        )
+        # Deduplication dropping below 3 -> rejected
+        self.assertEqual(
+            ai_service.parse_and_validate_places('["Place A", "place a", "Place B"]'),
+            [],
+        )
+        # Count > 5 -> rejected
+        self.assertEqual(
+            ai_service.parse_and_validate_places('["P1", "P2", "P3", "P4", "P5", "P6"]'),
+            [],
+        )
+        # Count < 3 -> rejected
+        self.assertEqual(
+            ai_service.parse_and_validate_places('["P1", "P2"]'),
+            [],
+        )
+        # Malformed JSON -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["P1", "P2", '), [])
+        # Object -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('{"places": ["P1", "P2", "P3"]}'), [])
+        # Mixed types -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["P1", 2, "P3"]'), [])
+        # Empty string member -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["P1", "", "P3"]'), [])
+        # Member > 120 chars -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places(f'["P1", "{"x" * 121}", "P3"]'), [])
+        # Response > 2000 chars -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places(f'["P1", "P2", "P3"]{" " * 2000}'), [])
+        # Control characters and surrogates -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["P1\\u0000", "P2", "P3"]'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('["P1\\x7f", "P2", "P3"]'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('["P1\\u0080", "P2", "P3"]'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('["\\u0085P1", "P2", "P3"]'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('["\\u0009P1", "P2", "P3"]'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('["\\u000aP1", "P2", "P3"]'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('["\\ud800P1", "P2", "P3"]'), [])
+        # Empty code fence -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('```json\n```'), [])
+        self.assertEqual(ai_service.parse_and_validate_places('```\n   \n```'), [])
+        # UTF-8 BOM prefix -> stripped and accepted
+        self.assertEqual(
+            ai_service.parse_and_validate_places('\ufeff["Place 1", "Place 2", "Place 3"]'),
+            ["Place 1", "Place 2", "Place 3"],
+        )
+        self.assertEqual(
+            ai_service.parse_and_validate_places('```json\n\ufeff["Place 1", "Place 2", "Place 3"]\n```'),
+            ["Place 1", "Place 2", "Place 3"],
+        )
+        # Control token -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["<|im_start|>P1", "P2", "P3"]'), [])
+        # Markup -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["<b>P1</b>", "P2", "P3"]'), [])
+        # URL scheme -> rejected
+        self.assertEqual(ai_service.parse_and_validate_places('["https://example.com", "P2", "P3"]'), [])
+        # Prose around fence -> rejected
+        self.assertEqual(
+            ai_service.parse_and_validate_places('Here are recommendations: ```json\n["P1", "P2", "P3"]\n```'),
+            [],
+        )
+
+    @patch.object(ai_service, "retrieve_all_knowledge_sources", return_value=([{"text": "chunk", "score": 0.9}], []))
+    @patch.object(ai_service, "_call_provider")
+    def test_generate_trip_outputs_single_retrieval_and_shared_context(
+        self, mock_provider, mock_retrieval
+    ) -> None:
+        os.environ.update(
+            OPENROUTER_API_KEY="key",
+            OPENROUTER_MODEL="model",
+            BEDROCK_KNOWLEDGE_BASE_ID="kb123",
+            RAG_ENABLED="true",
+        )
+        mock_provider.side_effect = [
+            "## Markdown Itinerary",
+            '["Place 1", "Place 2", "Place 3"]',
+        ]
+        result = ai_service.generate_trip_outputs(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="December",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Peak Season",
+        )
+        mock_retrieval.assert_called_once()
+        self.assertEqual(mock_provider.call_count, 2)
+        itin_prompt = mock_provider.call_args_list[0][0][1]
+        places_prompt = mock_provider.call_args_list[1][0][1]
+        self.assertIn("chunk", itin_prompt)
+        self.assertIn("chunk", places_prompt)
+        self.assertEqual(result.itinerary, "## Markdown Itinerary")
+        self.assertEqual(result.places, ["Place 1", "Place 2", "Place 3"])
+        self.assertEqual(result.itinerary_status, "success")
+        self.assertEqual(result.places_status, "success")
+
+    @patch.object(ai_service, "retrieve_all_knowledge_sources", side_effect=RuntimeError("Socket error"))
+    @patch.object(ai_service, "_call_provider")
+    def test_generate_trip_outputs_retrieval_failure_degrades_gracefully(
+        self, mock_provider, mock_retrieval
+    ) -> None:
+        os.environ.update(
+            OPENROUTER_API_KEY="key",
+            OPENROUTER_MODEL="model",
+            BEDROCK_KNOWLEDGE_BASE_ID="kb123",
+            RAG_ENABLED="true",
+        )
+        mock_provider.side_effect = [
+            "## Fallback Itinerary",
+            '["Place 1", "Place 2", "Place 3"]',
+        ]
+        result = ai_service.generate_trip_outputs(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="December",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Peak Season",
+        )
+        mock_retrieval.assert_called_once()
+        self.assertEqual(mock_provider.call_count, 2)
+        self.assertEqual(result.retrieval_status, "failed")
+        self.assertEqual(result.itinerary, "## Fallback Itinerary")
+        self.assertEqual(result.places, ["Place 1", "Place 2", "Place 3"])
+        self.assertEqual(result.itinerary_status, "success")
+        self.assertEqual(result.places_status, "success")
+
+    @patch.object(ai_service, "_call_provider", return_value="## Itinerary only")
+    def test_generate_trip_outputs_places_disabled(self, mock_provider) -> None:
+        os.environ.update(
+            OPENROUTER_API_KEY="key",
+            OPENROUTER_MODEL="model",
+            PLACES_GENERATION_ENABLED="false",
+        )
+        result = ai_service.generate_trip_outputs(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="December",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Peak Season",
+        )
+        mock_provider.assert_called_once()
+        self.assertEqual(result.itinerary, "## Itinerary only")
+        self.assertEqual(result.places, [])
+        self.assertEqual(result.places_status, "disabled")
+
+    @patch.object(ai_service, "_call_provider")
+    def test_generate_trip_outputs_independent_failures(self, mock_provider) -> None:
+        os.environ.update(OPENROUTER_API_KEY="key", OPENROUTER_MODEL="model")
+        # Case 1: Places fails, itinerary succeeds
+        mock_provider.side_effect = ["## Itinerary", "invalid json format"]
+        res1 = ai_service.generate_trip_outputs(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="December",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Peak Season",
+        )
+        self.assertEqual(res1.itinerary, "## Itinerary")
+        self.assertEqual(res1.places, [])
+        self.assertEqual(res1.itinerary_status, "success")
+        self.assertEqual(res1.places_status, "invalid_places")
+
+        # Case 2: Itinerary fails, places succeeds
+        mock_provider.side_effect = [None, '["P1", "P2", "P3"]']
+        res2 = ai_service.generate_trip_outputs(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="December",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Peak Season",
+        )
+        self.assertIsNone(res2.itinerary)
+        self.assertEqual(res2.places, ["P1", "P2", "P3"])
+        self.assertEqual(res2.itinerary_status, "provider_error")
+        self.assertEqual(res2.places_status, "success")
+
+        # Case 3: Itinerary returns whitespace only -> treated as provider_error
+        mock_provider.side_effect = ["   \n\t  ", '["P1", "P2", "P3"]']
+        res3 = ai_service.generate_trip_outputs(
+            destination="Bali",
+            country="Indonesia",
+            days=5,
+            budget=1500.0,
+            currency="USD",
+            travel_month="December",
+            category="Standard",
+            recommended_transportation="Train",
+            travel_season="Peak Season",
+        )
+        self.assertIsNone(res3.itinerary)
+        self.assertEqual(res3.places, ["P1", "P2", "P3"])
+        self.assertEqual(res3.itinerary_status, "provider_error")
+        self.assertEqual(res3.places_status, "success")
+
+    def test_generate_trip_outputs_no_provider_skips_retrieval(self) -> None:
+        with patch.object(ai_service, "retrieve_all_knowledge_sources") as mock_retrieval:
+            res = ai_service.generate_trip_outputs(
+                destination="Bali",
+                country="Indonesia",
+                days=5,
+                budget=1500.0,
+                currency="USD",
+                travel_month="December",
+                category="Standard",
+                recommended_transportation="Train",
+                travel_season="Peak Season",
+            )
+            mock_retrieval.assert_not_called()
+            self.assertIsNone(res.itinerary)
+            self.assertEqual(res.places, [])
+            self.assertEqual(res.itinerary_status, "no_provider")
+            self.assertEqual(res.places_status, "no_provider")
+
+    def test_generate_trip_outputs_no_provider_places_disabled_reports_disabled(self) -> None:
+        os.environ["PLACES_GENERATION_ENABLED"] = " false "
+        try:
+            res = ai_service.generate_trip_outputs(
+                destination="Bali",
+                country="Indonesia",
+                days=5,
+                budget=1500.0,
+                currency="USD",
+                travel_month="December",
+                category="Standard",
+                recommended_transportation="Train",
+                travel_season="Peak Season",
+            )
+            self.assertIsNone(res.itinerary)
+            self.assertEqual(res.places, [])
+            self.assertEqual(res.itinerary_status, "no_provider")
+            self.assertEqual(res.places_status, "disabled")
+            self.assertEqual(res.metrics["places_status"], "disabled")
+        finally:
+            os.environ.pop("PLACES_GENERATION_ENABLED", None)
+
+    @patch.object(ai_service, "wait")
+    def test_collector_timeout_handling(self, mock_wait) -> None:
+        os.environ.update(OPENROUTER_API_KEY="key", OPENROUTER_MODEL="model")
+        mock_fut_itin = Mock()
+        mock_fut_places = Mock()
+        mock_wait.return_value = (set(), [mock_fut_itin, mock_fut_places])
+        with patch.object(ai_service._GENERATION_EXECUTOR, "submit", side_effect=[mock_fut_itin, mock_fut_places]):
+            res = ai_service.generate_trip_outputs(
+                destination="Bali",
+                country="Indonesia",
+                days=5,
+                budget=1500.0,
+                currency="USD",
+                travel_month="December",
+                category="Standard",
+                recommended_transportation="Train",
+                travel_season="Peak Season",
+            )
+            mock_fut_itin.cancel.assert_called_once()
+            mock_fut_places.cancel.assert_called_once()
+            self.assertIsNone(res.itinerary)
+            self.assertEqual(res.places, [])
+            self.assertEqual(res.itinerary_status, "timeout")
+            self.assertEqual(res.places_status, "timeout")
+
+    @patch.object(ai_service, "_call_provider")
+    def test_paired_metrics_redaction(self, mock_provider) -> None:
+        os.environ.update(
+            OPENROUTER_API_KEY="secret-key",
+            OPENROUTER_MODEL="model",
+            AI_METRICS_ENABLED="true",
+        )
+        mock_provider.side_effect = ["## Itinerary", '["Place 1", "Place 2", "Place 3"]']
+        with self.assertLogs(ai_service.logger, level="INFO") as logs:
+            res = ai_service.generate_trip_outputs(
+                destination="TopSecretDestination",
+                country="SecretCountry",
+                days=5,
+                budget=1500.0,
+                currency="USD",
+                travel_month="December",
+                category="Standard",
+                recommended_transportation="Train",
+                travel_season="Peak Season",
+            )
+        output = "\n".join(logs.output)
+        self.assertIn("PAIRED_AI_METRICS:", output)
+        self.assertNotIn("secret-key", output)
+        self.assertNotIn("TopSecretDestination", output)
+        self.assertNotIn("SecretCountry", output)
+        self.assertNotIn("Place 1", output)
+        self.assertNotIn("Itinerary", output)
+        self.assertEqual(res.metrics["event"], "paired_generation")
+        self.assertEqual(res.metrics["provider"], "openrouter")
+        self.assertEqual(res.metrics["itinerary_status"], "success")
+        self.assertEqual(res.metrics["places_status"], "success")
+        self.assertEqual(res.metrics["places_count"], 3)
 
 
 if __name__ == "__main__":

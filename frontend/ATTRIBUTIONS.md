@@ -14,3 +14,7 @@ Verified 2026-08-26. Every shipped derivative is a local WebP, stripped of sourc
 | sydney / `public/landmarks/sydney-opera-house-dawn.webp` | [Sydney Opera House at Dawn.jpg](https://commons.wikimedia.org/wiki/File:Sydney_Opera_House_at_Dawn.jpg), Alan Kenneth Dicker / Albyontour | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) | 960×640 / 118552 / `789aded367a32105afd4cdc6b2173ac3cac55b6a1718cf9160988129729826c6` |
 
 The Mos.ru source requires an interactive source link and attribution; it does not imply Government of Moscow endorsement. The Machu Picchu author-specific credit and notification requirement are release gates. The Eiffel image is daytime; illuminated-image authorization is not relied upon. No original source files are committed.
+
+## Nature background geometry
+
+The pothos vine, five-petal flower, compass rose, paper airplane and flight path, line-art globe, and route-pin geometry are hand-authored in KelanaAI. The vine and flower geometry were adapted from the discarded design-time SVG shape in `frontend/src/components/preview/BotanicalMark.tsx`; the travel motifs are original primitive SVG geometry. No external asset file or upstream generated output was copied. The production version was mirrored, recolored, and arranged as fixed decorative SVGs on 2026-09-09. License: project AGPL-3.0, see `LICENSE`.

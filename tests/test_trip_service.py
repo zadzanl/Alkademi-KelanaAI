@@ -41,6 +41,10 @@ class TripServiceTests(unittest.TestCase):
             with self.subTest(budget=budget):
                 self.assertEqual(get_trip_category(budget), category)
 
+    def test_category_uses_daily_idr_budget(self) -> None:
+        self.assertEqual(get_trip_category(500_000, 1, "IDR"), "Backpacker")
+        self.assertEqual(get_trip_category(82_500_000, 5, "IDR"), "Standard")
+
     def test_ordered_places_for_every_category(self) -> None:
         expected = ["Tokyo Tower", "Shibuya", "Mount Fuji"]
         for category in ("Backpacker", "Standard", "Luxury"):

@@ -14,7 +14,7 @@ import { parseAuthMode, parsePublicUser, upstreamSessionCookie, upstreamSessionM
 import { RAG_COMPARE_TIMEOUT_MS } from "../frontend/src/services/knowledgeService.ts";
 import { chatIdempotencyEnabled } from "../frontend/src/services/chatService.ts";
 import { sendConversationMessageWithKeyAction } from "../frontend/src/app/actions.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
 	beginLogicalRetry,
 	canApplySendResult,
@@ -66,6 +66,70 @@ const validTrip = {
 	created_at: "2026-01-01T00:00:00Z",
 	ai_recommendation: null,
 };
+
+test("nature background is mounted from the root layout and stays decorative", () => {
+	const layoutSource = readFileSync(new URL("../frontend/src/app/layout.tsx", import.meta.url), "utf8");
+	const componentSource = readFileSync(new URL("../frontend/src/components/NatureBackground.tsx", import.meta.url), "utf8");
+	assert.match(layoutSource, /import \{ NatureBackground \} from "\.\.\/components\/NatureBackground";/);
+	assert.match(layoutSource, /<NatureBackground \/>/);
+	assert.match(componentSource, /aria-hidden="true"/);
+	assert.match(componentSource, /focusable="false"/);
+	assert.match(componentSource, /role="presentation"/);
+	assert.doesNotMatch(componentSource, /<(button|a|input)\b/);
+	assert.doesNotMatch(componentSource, /animation/);
+	assert.doesNotMatch(componentSource, /Math\.random/);
+});
+
+test("nature styles are light-only, preserve the dark star field, and gate sway behind no-preference", () => {
+	const cssSource = readFileSync(new URL("../frontend/src/app/globals.css", import.meta.url), "utf8");
+	assert.match(cssSource, /:root:not\(\[data-theme="dark"\]\) \.nature-background \{\s*display: block;\s*\}/);
+	assert.match(cssSource, /\[data-theme="dark"\] \.nature-background \{\s*display: none;\s*\}/);
+	assert.match(cssSource, /:root:not\(\[data-theme="dark"\]\) body > \.bg-paper \{\s*background-color: transparent;\s*\}/);
+	assert.match(cssSource, /:root:not\(\[data-theme="dark"\]\) \.nature-page-canvas \{\s*background-color: transparent;\s*\}/);
+	assert.match(cssSource, /\[data-theme="dark"\] body \{\s*background-color: #000000;\s*background-image:\s*radial-gradient\(circle at 9% 18%/);
+	assert.match(cssSource, /@media \(prefers-reduced-motion: no-preference\) \{\s*\.nature-vine \{[^}]*animation: nature-vine-sway 11s ease-in-out infinite alternate;/);
+	assert.match(cssSource, /animation-duration: 13s;/);
+	assert.match(cssSource, /animation-duration: 15s;/);
+	assert.match(cssSource, /@keyframes nature-vine-sway/);
+});
+
+test("nature travel motifs are fixed and the disposable preview surface is fully removed", () => {
+	const componentSource = readFileSync(new URL("../frontend/src/components/NatureBackground.tsx", import.meta.url), "utf8");
+	const layoutSource = readFileSync(new URL("../frontend/src/app/layout.tsx", import.meta.url), "utf8");
+	const cssSource = readFileSync(new URL("../frontend/src/app/globals.css", import.meta.url), "utf8");
+	for (const motif of ["CompassRose", "PaperAirplanePath", "LineGlobe", "RoutePin"]) {
+		assert.match(componentSource, new RegExp(`<${motif}\\b`));
+	}
+	const flowerInstances = componentSource.match(/<Flower\b/g) ?? [];
+	assert.equal(flowerInstances.length, 2);
+	assert.doesNotMatch(componentSource, /nature-flower--(blush|butter|lilac|cream)/);
+	assert.doesNotMatch(cssSource, /nature-flower--(blush|butter|lilac|cream)/);
+	assert.match(cssSource, /@keyframes nature-dash-march/);
+	const reducedMotionBlock = cssSource.match(/@media \(prefers-reduced-motion: no-preference\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
+	assert.match(reducedMotionBlock, /animation:\s*nature-dash-march\s+40s\s+linear\s+infinite/);
+	assert.equal((cssSource.match(/animation:\s*nature-dash-march\s+40s\s+linear\s+infinite/g) ?? []).length, 1);
+	const deletedPaths = [
+		"../frontend/src/app/animation1a/page.tsx",
+		"../frontend/src/app/animation1b/page.tsx",
+		"../frontend/src/app/animation1c/page.tsx",
+		"../frontend/src/app/animation1/page.tsx",
+		"../frontend/src/app/animation2/page.tsx",
+		"../frontend/src/app/animation3/page.tsx",
+		"../frontend/src/app/animation-index/page.tsx",
+		"../frontend/src/app/animation-background/page.tsx",
+		"../frontend/src/components/preview/PreviewShell.tsx",
+		"../frontend/src/components/preview/BotanicalMark.tsx",
+		"../frontend/src/components/preview/candidates.ts",
+		"../frontend/src/components/preview/metadata.ts",
+	];
+	for (const deletedPath of deletedPaths) {
+		assert.equal(existsSync(new URL(deletedPath, import.meta.url)), false, `${deletedPath} must be deleted`);
+	}
+	assert.doesNotMatch(cssSource, /Disposable botanical review fixture/);
+	assert.doesNotMatch(cssSource, /\.preview-/);
+	assert.doesNotMatch(cssSource, /preview-botanical-sway/);
+	assert.doesNotMatch(layoutSource, /animation/);
+});
 
 test("RAG comparison uses the dedicated 60 second timeout", () => {
 	assert.equal(RAG_COMPARE_TIMEOUT_MS, 60_000);
@@ -919,4 +983,51 @@ test("advanced disclosure focus restoration, mobile accordion, and form overflow
 	// Pagination current page has visible focus ring
 	assert.match(paginationSource, /currentClass =[\s\S]*focus-visible:outline-focus-ring/);
 });
+
+test("recommended_places guard strictly requires string elements", async () => {
+	process.env.API_URL = "http://api.test";
+	// Non-string member in array -> malformed
+	globalThis.fetch = async () => response({ ...validTrip, recommended_places: [123] });
+	await assert.rejects(
+		async () => getTrip(1),
+		(err: unknown) => err instanceof TripApiError && err.kind === "malformed",
+	);
+
+	globalThis.fetch = async () => response({ ...validTrip, recommended_places: [null] });
+	await assert.rejects(
+		async () => getTrip(1),
+		(err: unknown) => err instanceof TripApiError && err.kind === "malformed",
+	);
+
+	globalThis.fetch = async () => response({ ...validTrip, recommended_places: ["Valid Place", "Another Place"] });
+	const trip = await getTrip(1);
+	assert.deepEqual(trip?.recommended_places, ["Valid Place", "Another Place"]);
+});
+
+test("TripDetailView renders truthful trust copy for non-empty and empty places", () => {
+	const source = readFileSync(new URL("../frontend/src/components/TripDetailView.tsx", import.meta.url), "utf8");
+
+	// Non-empty trust copy
+	assert.match(
+		source,
+		/AI-suggested places to consider for this destination\. Verify opening hours, access, and local conditions before you go\./,
+	);
+
+	// Empty trust copy
+	assert.match(
+		source,
+		/Place suggestions are unavailable right now\. The rest of your trip plan is still available\./,
+	);
+
+	// Legacy placeholder copy removed
+	assert.doesNotMatch(
+		source,
+		/No place list was returned, but the rest of your plan is ready\./,
+	);
+	assert.doesNotMatch(
+		source,
+		/Your plan combines the trip details you provided with curated travel knowledge when available\./,
+	);
+});
+
 

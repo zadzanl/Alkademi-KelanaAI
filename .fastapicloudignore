@@ -1,0 +1,23 @@
+# Local and secret files
+.env
+.env.*
+.venv/
+backend/.venv/
+.neon
+
+# Generated caches and build output
+__pycache__/
+*.pyc
+node_modules/
+frontend/.next/
+frontend/out/
+coverage/
+
+# Repository-local tooling and planning artifacts are not needed by the API
+.agents/
+.agent/
+.impeccable/
+openspec/
+retrieved-document/
+tests/
+frontend/
