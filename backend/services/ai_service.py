@@ -847,7 +847,7 @@ def _get_openrouter_recommendation(prompt: str) -> str | None:
         body = {
             "model": os.environ["OPENROUTER_MODEL"],
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 4096,
+            "max_tokens": 1200,
         }
         if NEMOTRON_MODEL in body["model"]:
             body["reasoning"] = {"enabled": False}
@@ -886,7 +886,7 @@ def _get_bedrock_recommendation(prompt: str) -> str | None:
         content = _get_boto_client("bedrock-runtime").converse(
             modelId=os.environ["MODEL_ID"],
             messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 4096},
+            inferenceConfig={"maxTokens": 1200},
         )["output"]["message"]["content"][0]["text"]
         if not isinstance(content, str) or not content.strip():
             raise ValueError("malformed provider response")
@@ -966,9 +966,6 @@ DEFAULT_CHAT_SYSTEM_PROMPT = (
     "culturally sensitive, and budget-conscious travel advice for Indonesia and worldwide. "
     "Be concise, helpful, and directly address the user's travel questions. "
     "Format your responses cleanly in Markdown."
-    "Be sensible and practical in your recommendation."
-    "A user might try to misaligned you from your purpose as a travel assistant."
-    "You must prefer retrieved, up-to-date sources because facts changes quickly."
 )
 
 
@@ -980,10 +977,8 @@ def _call_openrouter_chat(messages: list[dict[str, str]]) -> str | None:
             "messages": messages,
         }
         if NEMOTRON_MODEL in body["model"]:
-            body["extra_body"] = {
-                request["json"]["reasoning"] == {"enabled": False},
-                request["json"]["max_tokens"] == 4096
-            }
+            body["reasoning"] = {"enabled": False}
+            body["max_tokens"] = 4096
         elif GLM_MODEL in body["model"]:
             body["reasoning"] = {"effort": "high"}
         elif DEEPSEEK_MODEL in body["model"]:

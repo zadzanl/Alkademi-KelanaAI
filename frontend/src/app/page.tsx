@@ -216,7 +216,7 @@ export default function Home() {
           ))}
           <div className="absolute inset-0 -z-10 bg-black/60" aria-hidden="true" />
           <div className="relative flex min-h-[36rem] items-center sm:min-h-[38rem] lg:min-h-[40rem]">
-            <div className="hero-panel max-w-2xl bg-indigo px-6 py-10 text-white sm:px-10 sm:py-14 lg:px-12 lg:py-16">
+            <div className="max-w-2xl bg-indigo px-6 py-10 text-white sm:px-10 sm:py-14 lg:px-12 lg:py-16">
               <h1 className="font-display max-w-[11ch] text-[clamp(3.25rem,7vw,5.5rem)] leading-[0.91] tracking-[-0.03em]">
                 Go farther with a plan that feels like you.
               </h1>
@@ -377,7 +377,7 @@ export default function Home() {
                     "Writing your trip snapshot…",
                   ][waitStage]}</p>
                   <p className="text-xs font-normal text-muted-ink">
-                    Stage {waitStage + 1} of 4 · This is a time estimate.
+                    Stage {waitStage + 1} of 4 · This is a progress estimate, may not reflect real progress.
                   </p>
                   <button
                     ref={stopWaitingRef}

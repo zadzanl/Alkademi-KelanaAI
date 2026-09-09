@@ -222,6 +222,33 @@ class AiServiceTests(unittest.TestCase):
         request = client.post.call_args.kwargs["json"]
         self.assertEqual(request["contents"]["text"]["maxCharacters"], 2000)
 
+    def test_openrouter_chat_model_payloads(self) -> None:
+        messages = [{"role": "user", "content": "Help plan my trip"}]
+        cases = [
+            (f"nvidia/{ai_service.NEMOTRON_MODEL}:free", {"enabled": False}, 4096),
+            (f"z-ai/{ai_service.GLM_MODEL}", {"effort": "high"}, None),
+            (f"deepseek/{ai_service.DEEPSEEK_MODEL}", {"effort": "low"}, None),
+            ("other-model", None, None),
+        ]
+        for model, reasoning, max_tokens in cases:
+            with self.subTest(model=model):
+                os.environ.update(OPENROUTER_API_KEY="test-key", OPENROUTER_MODEL=model)
+                response = Mock()
+                response.json.return_value = {"choices": [{"message": {"content": "  Reply  "}}]}
+                client = Mock()
+                client.post.return_value = response
+                with patch.object(ai_service, "_httpx_client", client):
+                    self.assertEqual(ai_service._call_openrouter_chat(messages), "Reply")
+                client.post.assert_called_once()
+                body = client.post.call_args.kwargs["json"]
+                expected = {"model": model, "messages": messages}
+                if reasoning is not None:
+                    expected["reasoning"] = reasoning
+                if max_tokens is not None:
+                    expected["max_tokens"] = max_tokens
+                self.assertEqual(body, expected)
+                response.raise_for_status.assert_called_once()
+
     def test_generate_chat_response_empty_messages(self) -> None:
         self.assertIsNone(ai_service.generate_chat_response([]))
 
