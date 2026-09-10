@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createConversationAction, getConversationMessagesAction, listConversationsAction, renameConversationAction, sendConversationMessageAction, sendConversationMessageWithKeyAction } from "../actions.ts";
+import { applyRefinementAction, createConversationAction, getConversationMessagesAction, listConversationsAction, renameConversationAction, sendConversationMessageAction, sendConversationMessageWithKeyAction } from "../actions.ts";
 import type { ChatActionResult, Conversation, Message } from "../../types/chat.ts";
 import { beginLogicalRetry, canApplySendResult, createLogicalSend, dedupeServerMessage, transitionLogicalSend, upsertLogicalSend, type LocalUserMessage } from "../../lib/chatState.ts";
 import { ChatSidebar } from "../../components/chat/ChatSidebar.tsx";
@@ -23,6 +23,7 @@ export default function ChatPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [isApplyingRefinement, setIsApplyingRefinement] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [, startTransition] = useTransition();
@@ -250,6 +251,15 @@ export default function ChatPage() {
     return { ok: true };
   };
 
+  const handleApplyRefinement = async () => {
+    if (activeConversationId === null || isApplyingRefinement) return;
+    setIsApplyingRefinement(true);
+    const result = await applyRefinementAction(activeConversationId);
+    setIsApplyingRefinement(false);
+    if (redirectIfUnauthorized(result)) return;
+    setNotice(result.ok ? { message: `Latest response applied to trip ${result.data.trip_id}.` } : { message: result.error });
+  };
+
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
   const activeMessages = activeConversationId === null ? EMPTY_MESSAGES : (messagesByConversation[activeConversationId] ?? EMPTY_MESSAGES);
   const visibleMessages = [...activeMessages.server, ...activeMessages.local].sort((left, right) => left.created_at.localeCompare(right.created_at));
@@ -305,6 +315,9 @@ export default function ChatPage() {
               isLoading={isSending}
               onRecoverMessage={handleRecoverMessage}
               onSelectSuggestion={handleSendMessage}
+              canApplyRefinement={Boolean(activeConversation?.refinement_trip_id && activeMessages.server.some((message) => message.role === "assistant"))}
+              onApplyRefinement={handleApplyRefinement}
+              isApplyingRefinement={isApplyingRefinement}
             />
           )}
           <ChatInput content={composerContent} onContentChange={setComposerContent} onSendMessage={handleSendMessage} disabled={isSending} />

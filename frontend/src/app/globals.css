@@ -118,12 +118,6 @@ body {
   display: none;
 }
 
-/* Botanical green keeps the light-mode hero distinct from the night-sky
-   palette without changing the shared indigo token used elsewhere. */
-:root:not([data-theme="dark"]) .hero-panel {
-  background-color: #174f45;
-}
-
 /* A static paper veil softens artwork without filtering text or introducing
   a full-viewport backdrop blur. Keep this treatment light-mode-only. */
 :root:not([data-theme="dark"]) .nature-background::after {
@@ -289,7 +283,7 @@ a {
 .profile-menu__avatar { display: inline-flex; height: 2rem; width: 2rem; align-items: center; justify-content: center; border-radius: 999px; background: var(--terracotta); color: #fff; font-size: 0.8125rem; font-weight: 700; }
 .profile-menu__name { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-menu__chevron { display: block; height: 0.75rem; width: 0.75rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
-.profile-menu__popover { position: absolute; right: 0; top: calc(100% + 0.75rem); display: none; min-width: 12rem; border: 1px solid var(--surface-rule); border-radius: var(--surface-radius); background: var(--paper-surface); padding: 0.375rem; box-shadow: 0 12px 30px rgb(0 0 0 / 14%); }
+.profile-menu__popover { position: absolute; right: 0; top: 100%; display: none; min-width: 12rem; border: 1px solid var(--surface-rule); border-radius: var(--surface-radius); background: var(--paper-surface); padding: 0.375rem; box-shadow: 0 12px 30px rgb(0 0 0 / 14%); }
 .profile-menu__popover::before { content: ""; position: absolute; left: 0; right: 0; top: -0.75rem; height: 0.75rem; }
 .profile-menu__popover--open { display: block; }
 .profile-menu__popover form { display: contents; }

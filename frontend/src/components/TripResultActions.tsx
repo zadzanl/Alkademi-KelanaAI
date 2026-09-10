@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { refineTripAction } from "../app/actions.ts";
 import type { TripResponse } from "../types/trip.ts";
 import { formatMoney } from "../lib/formatMoney.ts";
 
@@ -15,7 +17,18 @@ function shareText(trip: TripResponse): string {
 
 export function TripResultActions({ trip }: { trip: TripResponse }) {
   const [shared, setShared] = useState(false);
-  const draft = `Help me refine my ${trip.days}-day ${trip.destination} trip with a ${formatMoney(Number(trip.budget), trip.currency)} budget.`;
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const refinementOperation = useRef<string | null>(null);
+  const router = useRouter();
+  const refine = async () => {
+    if (refining) return;
+    setRefining(true); setRefineError(null);
+    refinementOperation.current ??= crypto.randomUUID();
+    const result = await refineTripAction(trip.id, refinementOperation.current);
+    if (result.ok) router.push(`/chat?conversation=${result.data.conversation_id}`);
+    else { setRefineError(result.error); setRefining(false); }
+  };
 
   const share = () => {
     const text = shareText(trip);
@@ -26,10 +39,13 @@ export function TripResultActions({ trip }: { trip: TripResponse }) {
   return (
     <div className="mt-8 flex flex-wrap gap-3 border-t border-surface-rule pt-6">
       <Link
-        href={`/chat?prefill=${encodeURIComponent(draft)}`}
+        href="#"
+        onClick={(event) => { event.preventDefault(); void refine(); }}
+        aria-disabled={refining}
+        aria-busy={refining}
         className="min-h-11 rounded-surface bg-terracotta px-4 py-3 text-sm font-bold text-white focus-visible:outline-focus-ring"
       >
-        Refine with KelanaAI
+        {refining ? "Opening refinement…" : "Refine with KelanaAI"}
       </Link>
       <Link
         href="/#planner"
@@ -49,6 +65,7 @@ export function TripResultActions({ trip }: { trip: TripResponse }) {
           Share opened.
         </span>
       )}
+      {refineError && <span role="alert" className="self-center text-sm text-red-700">{refineError}</span>}
     </div>
   );
 }

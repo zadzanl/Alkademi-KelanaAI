@@ -17,6 +17,8 @@ from backend.models.conversation import Conversation
 from backend.models.conversation_message_request import ConversationMessageRequest
 from backend.models.message import Message
 from backend.models.session import Session
+from backend.models.trip import Trip
+from backend.models.trip_refinement_request import TripRefinementRequest
 from backend.models.user import User
 from backend.services import ai_service
 
@@ -39,9 +41,11 @@ class ConversationApiTests(unittest.TestCase):
     def _clear_db():
         db = SessionLocal()
         try:
+            db.query(TripRefinementRequest).delete()
             db.query(ConversationMessageRequest).delete()
             db.query(Message).delete()
             db.query(Conversation).delete()
+            db.query(Trip).delete()
             db.query(Session).delete()
             db.query(User).delete()
             db.commit()
@@ -411,6 +415,62 @@ class ConversationApiTests(unittest.TestCase):
         self.client.cookies.set(AUTH_COOKIE_NAME, cookie)
         conversation_id = self.client.post("/api/v1/conversations", json={}).json()["conversation_id"]
         return conversation_id, str(uuid4())
+
+    def test_apply_refinement_updates_linked_trip_and_is_repeatable(self):
+        cookie = self._register_user("apply_owner")
+        self.client.cookies.set(AUTH_COOKIE_NAME, cookie)
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == "apply_owner").one()
+            trip = Trip(user_id=user.id, destination="Bali", country="Indonesia", days=3, budget=1000,
+                        currency="USD", travel_month="June", daily_budget=333.33,
+                        travel_season="Dry", category="Standard", recommended_places=[],
+                        recommended_transportation="Train", ai_recommendation="Original")
+            db.add(trip); db.flush()
+            conversation = Conversation(user_id=user.id, title="Refinement")
+            db.add(conversation); db.flush()
+            db.add(TripRefinementRequest(user_id=user.id, trip_id=trip.id, operation_id=str(uuid4()),
+                                         conversation_id=conversation.id, message_key=str(uuid4())))
+            db.add(Message(conversation_id=conversation.id, role="assistant", content="Updated plan"))
+            db.commit()
+            conversation_id, trip_id = conversation.id, trip.id
+        finally:
+            db.close()
+
+        first = self.client.post(f"/api/v1/conversations/{conversation_id}/apply")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json(), {"trip_id": trip_id, "ai_recommendation": "Updated plan"})
+        second = self.client.post(f"/api/v1/conversations/{conversation_id}/apply")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["trip_id"], trip_id)
+
+    def test_apply_refinement_rejects_unlinked_missing_response_and_non_owner(self):
+        cookie = self._register_user("apply_rejections")
+        self.client.cookies.set(AUTH_COOKIE_NAME, cookie)
+        conversation_id = self.client.post("/api/v1/conversations", json={}).json()["conversation_id"]
+        self.assertEqual(self.client.post(f"/api/v1/conversations/{conversation_id}/apply").status_code, 404)
+
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == "apply_rejections").one()
+            trip = Trip(user_id=user.id, destination="Bali", country="Indonesia", days=3, budget=1000,
+                        currency="USD", travel_month="June", daily_budget=333.33, travel_season="Dry",
+                        category="Standard", recommended_places=[], recommended_transportation="Train",
+                        ai_recommendation="Original")
+            db.add(trip); db.flush()
+            linked = Conversation(user_id=user.id, title="Linked")
+            db.add(linked); db.flush()
+            db.add(TripRefinementRequest(user_id=user.id, trip_id=trip.id, operation_id=str(uuid4()),
+                                         conversation_id=linked.id, message_key=str(uuid4())))
+            db.commit()
+            linked_id = linked.id
+        finally:
+            db.close()
+        self.assertEqual(self.client.post(f"/api/v1/conversations/{linked_id}/apply").status_code, 422)
+
+        other_cookie = self._register_user("apply_other")
+        self.client.cookies.set(AUTH_COOKIE_NAME, other_cookie)
+        self.assertEqual(self.client.post(f"/api/v1/conversations/{linked_id}/apply").status_code, 404)
 
     def _assert_keyed_rows(self, conversation_id, *, status, messages):
         db = SessionLocal()

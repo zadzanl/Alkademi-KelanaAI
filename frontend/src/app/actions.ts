@@ -6,7 +6,7 @@ import { invalidateTripsCache } from "../lib/tripCache.ts";
 import { compareRagRecommendation } from "../services/knowledgeService.ts";
 import type { RagComparisonResponse } from "../types/knowledge.ts";
 import type { ActionState, FormValues, TripRequest } from "./types.ts";
-import type { ChatActionResult, Conversation, ConversationCreateResponse, Message } from "../types/chat.ts";
+import type { ApplyRefinementResponse, ChatActionResult, Conversation, ConversationCreateResponse, Message } from "../types/chat.ts";
 import { authFetch, clearLocalSession, getCurrentUser, parseAuthMode, parsePublicUser, persistUpstreamSession, type AuthMode, type AuthResult } from "../services/authService.ts";
 export type AuthActionState = AuthResult & { submittedUsername?: string; authMode?: AuthMode };
 
@@ -185,6 +185,20 @@ export async function createConversationAction(title?: string): Promise<ChatActi
   } catch (error) {
     return chatFailure(error, "Failed to create conversation.");
   }
+}
+
+export async function refineTripAction(tripId: number, operationId: string): Promise<ChatActionResult<{ conversation_id: number; title: string; message: Message }>> {
+  try {
+    const { refineTrip } = await import("../services/chatService.ts");
+    return { ok: true, data: await refineTrip(tripId, operationId) };
+  } catch (error) { return chatFailure(error, "We could not refine this itinerary. Please try again."); }
+}
+
+export async function applyRefinementAction(conversationId: number): Promise<ChatActionResult<ApplyRefinementResponse>> {
+  try {
+    const { applyRefinement } = await import("../services/chatService.ts");
+    return { ok: true, data: await applyRefinement(conversationId) };
+  } catch (error) { return chatFailure(error, "We could not apply this refinement."); }
 }
 
 export async function listConversationsAction(): Promise<ChatActionResult<Conversation[]>> {

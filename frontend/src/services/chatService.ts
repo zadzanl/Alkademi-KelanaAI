@@ -1,5 +1,5 @@
 import { getApiBaseUrl, getSessionCookieHeader, TripApiError } from "./tripService.ts";
-import type { Conversation, ConversationCreateResponse, Message } from "../types/chat.ts";
+import type { ApplyRefinementResponse, Conversation, ConversationCreateResponse, Message } from "../types/chat.ts";
 
 const CHAT_READ_TIMEOUT_MS = 10_000;
 const CHAT_SEND_TIMEOUT_MS = 60_000;
@@ -59,6 +59,39 @@ export async function createConversation(title?: string): Promise<ConversationCr
     throw new TripApiError("upstream", "Failed to create conversation.", response.status);
   }
 
+  return response.json();
+}
+
+export async function refineTrip(tripId: number, operationId: string): Promise<{ conversation_id: number; title: string; message: Message }> {
+  const baseUrl = getApiBaseUrl();
+  const sessionCookie = await getSessionCookieHeader();
+  if (!sessionCookie) throw new TripApiError("unauthorized", "Sign in to refine your itinerary.", 401);
+  const response = await fetch(`${baseUrl}/api/v1/trips/${tripId}/refine`, {
+    method: "POST", headers: { "Content-Type": "application/json", Cookie: sessionCookie },
+    body: JSON.stringify({ operation_id: operationId }), signal: AbortSignal.timeout(CHAT_SEND_TIMEOUT_MS),
+  });
+  if (response.status === 401) throw new TripApiError("unauthorized", "Sign in to refine your itinerary.", 401);
+  if (!response.ok) {
+    let message = "We could not refine this itinerary. Please try again.";
+    try { const detail = await response.json(); if (typeof detail.detail === "string") message = detail.detail; } catch { /* fixed copy */ }
+    throw new TripApiError(response.status === 422 ? "validation" : "upstream", message, response.status);
+  }
+  return response.json();
+}
+
+export async function applyRefinement(conversationId: number): Promise<ApplyRefinementResponse> {
+  const baseUrl = getApiBaseUrl();
+  const sessionCookie = await getSessionCookieHeader();
+  if (!sessionCookie) throw new TripApiError("unauthorized", "Sign in to apply a refinement.", 401);
+  const response = await fetch(`${baseUrl}/api/v1/conversations/${conversationId}/apply`, {
+    method: "POST", headers: { Cookie: sessionCookie }, signal: AbortSignal.timeout(CHAT_READ_TIMEOUT_MS),
+  });
+  if (response.status === 401) throw new TripApiError("unauthorized", "Sign in to apply a refinement.", 401);
+  if (!response.ok) {
+    let message = "We could not apply this refinement.";
+    try { const detail = await response.json(); if (typeof detail.detail === "string") message = detail.detail; } catch { /* fixed copy */ }
+    throw new TripApiError("upstream", message, response.status);
+  }
   return response.json();
 }
 

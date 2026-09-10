@@ -2,6 +2,7 @@ export type Conversation = {
   id: number;
   title: string;
   created_at: string;
+  refinement_trip_id?: number | null;
 };
 
 export type ConversationCreateResponse = {
@@ -18,6 +19,11 @@ export type Message = {
   role: MessageRole;
   content: string;
   created_at: string;
+};
+
+export type ApplyRefinementResponse = {
+  trip_id: number;
+  ai_recommendation: string;
 };
 
 export type ChatErrorKind =

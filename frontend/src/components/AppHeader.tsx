@@ -21,7 +21,6 @@ export function AppHeader({ username }: AppHeaderProps) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-  const isTouchRef = useRef(false);
 
   useEffect(() => {
     setTheme(
@@ -132,15 +131,6 @@ export function AppHeader({ username }: AppHeaderProps) {
             <div
               ref={profileMenuRef}
               className="profile-menu"
-              onTouchStart={() => {
-                isTouchRef.current = true;
-              }}
-              onMouseEnter={() => {
-                if (!isTouchRef.current) setProfileOpen(true);
-              }}
-              onMouseLeave={() => {
-                if (!isTouchRef.current) setProfileOpen(false);
-              }}
             >
               <button
                 ref={profileTriggerRef}

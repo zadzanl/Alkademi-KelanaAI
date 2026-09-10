@@ -17,9 +17,12 @@ interface ChatMessageListProps {
   isLoading?: boolean;
   onRecoverMessage?: (message: LocalUserMessage) => void;
   onSelectSuggestion?: (content: string) => void;
+  onApplyRefinement?: () => void;
+  canApplyRefinement?: boolean;
+  isApplyingRefinement?: boolean;
 }
 
-export function ChatMessageList({ messages, isLoading, onRecoverMessage, onSelectSuggestion }: ChatMessageListProps) {
+export function ChatMessageList({ messages, isLoading, onRecoverMessage, onSelectSuggestion, onApplyRefinement, canApplyRefinement, isApplyingRefinement }: ChatMessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -67,6 +70,11 @@ export function ChatMessageList({ messages, isLoading, onRecoverMessage, onSelec
             onRecover={onRecoverMessage}
           />
         ))}
+        {canApplyRefinement && !isLoading && onApplyRefinement && (
+          <button type="button" onClick={onApplyRefinement} disabled={isApplyingRefinement} className="mb-4 px-3 py-2 text-sm font-semibold border border-terracotta/40 text-terracotta-dark rounded-surface hover:bg-terracotta/10 disabled:opacity-50 focus-visible:outline-focus-ring">
+            {isApplyingRefinement ? "Applying…" : "Apply latest response to trip"}
+          </button>
+        )}
         {isLoading && (
           <div className="mb-4" role="status" aria-label="Assistant is thinking">
             <TypingIndicator />
